@@ -1646,6 +1646,7 @@ AC_CONFIG_FILES([bin/Makefile
 
 AC_CONFIG_FILES([lib/Makefile
 		 lib/isc/Makefile
+		 lib/saq/Makefile
 		 lib/dns/Makefile
 		 lib/ns/Makefile
 		 lib/isccfg/Makefile

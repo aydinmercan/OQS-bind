@@ -161,7 +161,20 @@ digest_sig(dst_context_t *ctx, bool downcase, dns_rdata_t *sigrdata,
 	INSIST(r.length >= 19);
 
 	r.length = 18;
+	unsigned char key_tag[2];
+	key_tag[0] = r.base[16];
+	key_tag[1] = r.base[17];
+	if (dst_algorithm_is_deferred_signing(rrsig->algorithm)) {
+		// If this is a deferred signing algorithm, we can't include
+		// a keyid until after finalization. However that would
+		// cause all signatures and the root id to change. So
+		// we 0 out the key idea to prevent this.
+		r.base[16] = 0;
+		r.base[17] = 0;
+        }
 	ret = dst_context_adddata(ctx, &r);
+	r.base[16] = key_tag[0];
+	r.base[17] = key_tag[1];
 	if (ret != ISC_R_SUCCESS) {
 		return ret;
 	}
@@ -1096,7 +1109,6 @@ dns_dnssec_signs(dns_rdata_t *rdata, const dns_name_t *name,
 		dns_rdataset_current(sigrdataset, &sigrdata);
 		result = dns_rdata_tostruct(&sigrdata, &sig, NULL);
 		RUNTIME_CHECK(result == ISC_R_SUCCESS);
-
 		if (sig.algorithm == key.algorithm && sig.keyid == keytag) {
 			result = dns_dnssec_verify(name, rdataset, dstkey,
 						   ignoretime, 0, mctx,

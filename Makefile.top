@@ -71,3 +71,9 @@ LIBISCCC_CFLAGS = \
 
 LIBISCCC_LIBS = \
 	$(top_builddir)/lib/isccc/libisccc.la
+
+LIBSAQ_CFLAGS = \
+	-I$(top_srcdir)/lib/saq/include
+
+LIBSAQ_LIBS = \
+	$(top_builddir)/lib/saq/libsaq.la

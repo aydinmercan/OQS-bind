@@ -549,12 +549,14 @@ static dst_func_t openssleddsa_functions = {
 	openssleddsa_destroyctx,
 	openssleddsa_adddata,
 	openssleddsa_sign,
+	NULL, /*%< finalizesignature */
 	openssleddsa_verify,
 	NULL, /*%< verify2 */
 	NULL, /*%< computesecret */
 	dst__openssl_keypair_compare,
 	NULL, /*%< paramcompare */
 	openssleddsa_generate,
+	NULL, /*%< finalizekey */
 	dst__openssl_keypair_isprivate,
 	dst__openssl_keypair_destroy,
 	openssleddsa_todns,

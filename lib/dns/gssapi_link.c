@@ -335,12 +335,14 @@ static dst_func_t gssapi_functions = {
 	gssapi_destroy_signverify_ctx,
 	gssapi_adddata,
 	gssapi_sign,
+	NULL, /*%< finalizesignature */
 	gssapi_verify,
 	NULL, /*%< verify2 */
 	NULL, /*%< computesecret */
 	gssapi_compare,
 	NULL, /*%< paramcompare */
 	gssapi_generate,
+	NULL, /*%< finalizekey */
 	gssapi_isprivate,
 	gssapi_destroy,
 	NULL, /*%< todns */

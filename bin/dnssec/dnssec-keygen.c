@@ -324,6 +324,7 @@ keygen(keygen_ctx_t *ctx, isc_mem_t *mctx, int argc, char **argv) {
 			case DST_ALG_SPHINCSSHA256128S:
 			case DST_ALG_XMSS:
 			case DST_ALG_XMSSMT:
+			case DST_ALG_MERKLE_TREE:
 				break;
 			default:
 				fatal("algorithm %s is incompatible with NSEC3"
@@ -379,6 +380,7 @@ keygen(keygen_ctx_t *ctx, isc_mem_t *mctx, int argc, char **argv) {
 			case DST_ALG_SPHINCSSHA256128S:
 			case DST_ALG_XMSS:
 			case DST_ALG_XMSSMT:
+			case DST_ALG_MERKLE_TREE:
 				break;
 			default:
 				fatal("key size not specified (-b option)");
@@ -577,6 +579,9 @@ keygen(keygen_ctx_t *ctx, isc_mem_t *mctx, int argc, char **argv) {
 		if (ctx->size == -1) {
 			fatal("XMSSMT failed to get bits based on param");
 		}
+		break;
+	case DST_ALG_MERKLE_TREE:
+		ctx->size = 256;
 		break;
 	}
 

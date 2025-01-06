@@ -7475,7 +7475,7 @@ sign_a_node(dns_db_t *db, dns_zone_t *zone, dns_name_t *name,
 	dns_stats_t *dnssecsignstats;
 	bool offlineksk = false;
 	isc_buffer_t buffer;
-	unsigned char data[399360]; // OQS increased this from 1024 to account for XMSSMT-SHAKE256-H60/12 signatures
+	unsigned char data[39960]; // OQS increased this from 1024 to account for XMSSMT-SHAKE256-H60/12 signatures
 	bool seen_soa, seen_ns, seen_rr, seen_nsec, seen_nsec3, seen_ds;
 
 	if (zone->kasp != NULL) {

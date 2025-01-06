@@ -1,3 +1,3 @@
 include $(top_srcdir)/Makefile.top
 
-SUBDIRS = isc dns isccc ns isccfg
+SUBDIRS = isc saq dns isccc ns isccfg

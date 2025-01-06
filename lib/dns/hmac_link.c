@@ -118,12 +118,14 @@
 		hmac##alg##_destroyctx,                                        \
 		hmac##alg##_adddata,                                           \
 		hmac##alg##_sign,                                              \
+		NULL, /*%< finalizesignature */                                \
 		hmac##alg##_verify,                                            \
 		NULL, /*%< verify2 */                                          \
 		NULL, /*%< computesecret */                                    \
 		hmac##alg##_compare,                                           \
 		NULL, /*%< paramcompare */                                     \
 		hmac##alg##_generate,                                          \
+		NULL, /*%< finalizekey */                                      \
 		hmac##alg##_isprivate,                                         \
 		hmac##alg##_destroy,                                           \
 		hmac##alg##_todns,                                             \

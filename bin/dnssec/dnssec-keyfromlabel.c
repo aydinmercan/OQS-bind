@@ -420,6 +420,7 @@ main(int argc, char **argv) {
 			case DST_ALG_SPHINCSSHA256128S:
 			case DST_ALG_XMSS:
 			case DST_ALG_XMSSMT:
+			case DST_ALG_MERKLE_TREE:
 				break;
 			default:
 				fatal("%s is incompatible with NSEC3; "

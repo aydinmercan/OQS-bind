@@ -1149,22 +1149,24 @@ static dst_func_t opensslecdsa_functions = {
 	opensslecdsa_destroyctx,
 	opensslecdsa_adddata,
 	opensslecdsa_sign,
+	NULL, /*%< finalizesignature */
 	opensslecdsa_verify,
 	NULL, /*%< verify2 */
 	NULL, /*%< computesecret */
 	dst__openssl_keypair_compare,
 	NULL, /*%< paramcompare */
 	opensslecdsa_generate,
+	NULL, /*%< finalizekey */
 	dst__openssl_keypair_isprivate,
 	dst__openssl_keypair_destroy,
 	opensslecdsa_todns,
 	opensslecdsa_fromdns,
 	opensslecdsa_tofile,
 	opensslecdsa_parse,
-	NULL,			/*%< cleanup */
-	opensslecdsa_fromlabel, /*%< fromlabel */
-	NULL,			/*%< dump */
-	NULL,			/*%< restore */
+	NULL, /*%< cleanup */
+	opensslecdsa_fromlabel,
+	NULL, /*%< dump */
+	NULL, /*%< restore */
 };
 
 isc_result_t

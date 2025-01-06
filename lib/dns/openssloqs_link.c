@@ -556,21 +556,29 @@ err:
 }
 
 static dst_func_t openssloqs_functions = {
-	openssloqs_createctx, NULL, /*%< createctx2 */
-	openssloqs_destroyctx, openssloqs_adddata, openssloqs_sign,
-	openssloqs_verify, NULL,	    /*%< verify2 */
-	NULL,				    /*%< computesecret */
-	dst__openssl_keypair_compare, NULL, /*%< paramcompare */
-	openssloqs_generate, dst__openssl_keypair_isprivate,
+	openssloqs_createctx,
+	NULL, /*%< createctx2 */
+	openssloqs_destroyctx,
+	openssloqs_adddata,
+	openssloqs_sign,
+	NULL, /*%< finalizesignature */
+	openssloqs_verify,
+	NULL, /*%< verify2 */
+	NULL, /*%< computesecret */
+	dst__openssl_keypair_compare,
+	NULL, /*%< paramcompare */
+	openssloqs_generate,
+	NULL, /*%< finalizekey */
+	dst__openssl_keypair_isprivate,
 	dst__openssl_keypair_destroy,
-	openssloqs_todns,   // called by dst_key_todns converts a dst_key to a
-			    // buffer
-	openssloqs_fromdns, // called by from buffer and constructs a key from
-			    // dns
-	openssloqs_tofile, openssloqs_parse, NULL, /*%< cleanup */
-	NULL,					   /*%< fromlabel */
-	NULL,					   /*%< dump */
-	NULL,					   /*%< restore */
+	openssloqs_todns,
+	openssloqs_fromdns,
+	openssloqs_tofile,
+	openssloqs_parse,
+	NULL, /*%< cleanup */
+	NULL, /*%< fromlabel */
+	NULL, /*%< dump */
+	NULL, /*%< restore */
 };
 
 isc_result_t

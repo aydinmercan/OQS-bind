@@ -66,6 +66,8 @@
 #include <dns/ttl.h>
 #include <dns/types.h>
 
+#include <saq/merkleauthpath.h>
+
 #include "dst_internal.h"
 
 #define DST_AS_STR(t) ((t).value.as_textregion.base)
@@ -236,6 +238,7 @@ dst_lib_init(isc_mem_t *mctx, const char *engine) {
 	RETERR(dst__openssloqs_init(&dst_t_func[DST_ALG_SPHINCSSHA256128S]));
 	RETERR(dst__liboqsstateful_init(&dst_t_func[DST_ALG_XMSS]));
 	RETERR(dst__liboqsstateful_init(&dst_t_func[DST_ALG_XMSSMT]));
+	RETERR(dst__saqmerkle_init(&dst_t_func[DST_ALG_MERKLE_TREE]));
 
 	dst_initialized = true;
 	return ISC_R_SUCCESS;
@@ -270,6 +273,20 @@ dst_algorithm_supported(unsigned int alg) {
 	}
 	return true;
 }
+
+bool
+dst_algorithm_is_deferred_signing(const int alg) {
+	REQUIRE(dst_initialized);
+
+	switch (alg) {
+	case DST_ALG_MERKLE_TREE:
+		return (true);
+		break;
+	default:
+		return (false);
+	}
+}
+
 
 bool
 dst_ds_digest_supported(unsigned int digest_type) {
@@ -688,28 +705,6 @@ dst_key_fromnamedfile(const char *filename, const char *dirname, int type,
 	}
 	RETERR(computeid(key));
 	if (pubkey->key_id != key->key_id) {
-		fprintf(stderr, "pubkey->key_id: %d, key->key_id: %d\n",
-			pubkey->key_id, key->key_id);
-		fflush(stderr);
-		isc_buffer_t *pkb = pubkey->keydata.oqs_stfl_keypair.pub;
-		isc_buffer_t *kb = key->keydata.oqs_stfl_keypair.pub;
-		isc_region_t pkr, kr;
-		isc_buffer_usedregion(pkb, &pkr);
-		isc_buffer_usedregion(kb, &kr);
-		if (memcmp(pkr.base, kr.base, 68) != 0) {
-			fprintf(stderr, "DIFFERENT\n");
-			fprintf(stderr, "\tpkr.length: %d\n", pkr.length);
-			fprintf(stderr, "\tkr.length: %d\n", kr.length);
-			for (int i = 0; i < 68; i++) {
-				if (pkr.base[i] != kr.base[i]) {
-					fprintf(stderr,
-						"\t\ti=%d, pkr[i]=\\x%02x, "
-						"kr[i]=\\x%02x\n",
-						i, pkr.base[i], kr.base[i]);
-				}
-			}
-			fflush(stderr);
-		}
 		RETERR(DST_R_INVALIDPRIVATEKEY);
 	}
 
@@ -1105,6 +1100,104 @@ dst_key_generate(const dns_name_t *name, unsigned int alg, unsigned int bits,
 	return ISC_R_SUCCESS;
 }
 
+bool
+dst_key_is_deferred_signing(const dst_key_t *key) {
+	REQUIRE(dst_initialized);
+	REQUIRE(VALID_KEY(key));
+	CHECKALG(key->key_alg);
+
+	switch (key->key_alg) {
+	case DST_ALG_MERKLE_TREE:
+		return (true);
+		break;
+	default:
+		return (false);
+	}
+}
+
+isc_result_t
+dst_key_finalize(dst_key_t *key) {
+	isc_result_t ret;
+	REQUIRE(dst_initialized);
+	REQUIRE(VALID_KEY(key));
+	CHECKALG(key->key_alg);
+	REQUIRE(dst_key_is_deferred_signing(key));
+
+	if (key->func->finalizekey == NULL) {
+		return (DST_R_UNSUPPORTEDALG);
+	}
+
+	ret = key->func->finalizekey(key);
+	if (ret != ISC_R_SUCCESS) {
+		return ret;
+	}
+	return (computeid(key));
+}
+
+isc_result_t
+dst_key_signature_finalize(const dst_key_t *key, isc_buffer_t *databuf, dns_rdata_t *intsig, dns_rdata_t *finalsig) {
+	dns_rdata_rrsig_t fs;
+	dns_rdata_rrsig_t is;
+	dns_rdata_t finalsig_rdata = DNS_RDATA_INIT;
+	isc_region_t isr;
+	isc_buffer_t fsb;
+	isc_result_t ret;
+	unsigned int sigsize = 0;
+	REQUIRE(VALID_KEY(key));
+	REQUIRE(intsig != NULL);
+	REQUIRE(finalsig != NULL);
+	CHECKALG(key->key_alg);
+	REQUIRE(dst_key_is_deferred_signing(key));
+
+	if (key->keydata.generic == NULL) {
+		return (DST_R_NULLKEY);
+	}
+
+	if (key->func->isprivate == NULL || !key->func->isprivate(key)) {
+		return (DST_R_NOTPRIVATEKEY);
+	}
+
+	if (key->func->finalizesignature == NULL) {
+		return (DST_R_NOTPRIVATEKEY);
+	}
+
+	dns_rdata_clone(intsig, &finalsig_rdata);
+	ret = dns_rdata_tostruct(intsig, &is, NULL);
+	if (ret != ISC_R_SUCCESS) {
+		goto free_is;
+	}
+	ret = dns_rdata_tostruct(&finalsig_rdata, &fs, NULL);
+	if (ret != ISC_R_SUCCESS) {
+		goto free_is;
+	}
+	ret = dst_key_sigsize(key, &sigsize);
+	if (ret != ISC_R_SUCCESS) {
+		goto free_fs;
+	}
+
+	fs.siglen = sigsize;
+	fs.signature = isc_mem_get(key->mctx, fs.siglen);
+	isc_buffer_init(&fsb, fs.signature, fs.siglen);
+	isr.base = is.signature;
+	isr.length = is.siglen;
+
+	ret = key->func->finalizesignature(key, isr, &fsb);
+	if (ret != ISC_R_SUCCESS) {
+		isc_mem_put(key->mctx, fs.signature, fs.siglen);
+		goto free_fs;
+	}
+	fs.keyid = dst_key_id(key);
+
+	dns_rdata_fromstruct(finalsig, intsig->rdclass, dns_rdatatype_rrsig, &fs, databuf);
+	isc_mem_put(key->mctx, fs.signature, fs.siglen);
+
+free_fs:
+	dns_rdata_freestruct(&fs);
+free_is:
+	dns_rdata_freestruct(&is);
+	return (ret);
+}
+
 isc_result_t
 dst_key_getbool(const dst_key_t *key, int type, bool *valuep) {
 	REQUIRE(VALID_KEY(key));
@@ -1470,6 +1563,7 @@ dst_key_sigsize(const dst_key_t *key, unsigned int *n) {
 	REQUIRE(dst_initialized);
 	REQUIRE(VALID_KEY(key));
 	REQUIRE(n != NULL);
+	uint64_t merkle_size = 0;
 
 	switch (key->key_alg) {
 	case DST_ALG_RSASHA1:
@@ -1523,6 +1617,28 @@ dst_key_sigsize(const dst_key_t *key, unsigned int *n) {
 	case DST_ALG_XMSS:
 	case DST_ALG_XMSSMT:
 		*n = key->keydata.oqs_stfl_keypair.ctx->length_signature;
+		break;
+	case DST_ALG_MERKLE_TREE:
+		// When using merkle trees signing is two steps. First
+		// the data is added to the tree and an intermediate signature
+		// is returned that contains the index of the data in the
+		// merkle tree. Then the signature is finalized. If
+		// the key's root hash is not NULL, compute the size
+		// of the authenticating path that would be generated.
+		// If it is NULL only save enough room for the index in
+		// the merkle tree.
+		if (key->keydata.saq_merkle_tree.root_hash == NULL) {
+			*n = sizeof(uint64_t);
+		} else {
+			if (SAQ_merkle_stream_max_authentication_path_byte_size(
+						key->keydata.saq_merkle_tree.tree,
+						&merkle_size) == SAQ_SUCCESS)
+			{
+				*n = merkle_size;
+			} else {
+				*n = sizeof(uint64_t);
+			}
+		}
 		break;
 	case DST_ALG_DH:
 	default:
@@ -1756,7 +1872,6 @@ dst_key_read_public(const char *filename, int type, isc_mem_t *mctx,
 	if (ret != ISC_R_SUCCESS) {
 		goto cleanup;
 	}
-
 	ret = dst_key_fromdns(dns_fixedname_name(&name), rdclass, &b, mctx,
 			      keyp);
 	if (ret != ISC_R_SUCCESS) {

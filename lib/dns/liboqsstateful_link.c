@@ -633,21 +633,29 @@ liboqsstateful_keypair_destroy(dst_key_t *key) {
 }
 
 static dst_func_t liboqsstateful_functions = {
-	liboqsstateful_createctx, NULL, /*%< createctx2 */
-	liboqsstateful_destroyctx, liboqsstateful_adddata, liboqsstateful_sign,
-	liboqsstateful_verify, NULL,	      /*%< verify2 */
-	NULL,				      /*%< computesecret */
-	liboqsstateful_keypair_compare, NULL, /*%< paramcompare */
-	liboqsstateful_generate, liboqsstateful_keypair_isprivate,
+	liboqsstateful_createctx,
+	NULL, /*%< createctx2 */
+	liboqsstateful_destroyctx,
+	liboqsstateful_adddata,
+	liboqsstateful_sign,
+	NULL, /*%< finalizesignature */
+	liboqsstateful_verify,
+	NULL, /*%< verify2 */
+	NULL, /*%< computesecret */
+	liboqsstateful_keypair_compare,
+	NULL, /*%< paramcompare */
+	liboqsstateful_generate,
+	NULL, /*%< finalizekey */
+	liboqsstateful_keypair_isprivate,
 	liboqsstateful_keypair_destroy,
-	liboqsstateful_todns, // called by dst_key_todns converts a dst_key to a
-			      // buffer
-	liboqsstateful_fromdns, // called by from buffer and constructs a key
-				// from dns
-	liboqsstateful_tofile, liboqsstateful_parse, NULL, /*%< cleanup */
-	NULL,						   /*%< fromlabel */
-	NULL,						   /*%< dump */
-	NULL,						   /*%< restore */
+	liboqsstateful_todns,
+	liboqsstateful_fromdns,
+	liboqsstateful_tofile,
+	liboqsstateful_parse,
+	NULL, /*%< cleanup */
+	NULL, /*%< fromlabel */
+	NULL, /*%< dump */
+	NULL, /*%< restore */
 };
 
 isc_result_t

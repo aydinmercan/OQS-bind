@@ -30,13 +30,14 @@
 #pragma once
 
 #include <inttypes.h>
-#include <oqs/oqs.h>
 #include <stdbool.h>
 
+#include <oqs/oqs.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/objects.h>
 #include <openssl/rsa.h>
+#include <saq/merklestream.h>
 
 #include <isc/buffer.h>
 #include <isc/hmac.h>
@@ -69,6 +70,8 @@ typedef struct dst_func dst_func_t;
 typedef struct dst_hmac_key dst_hmac_key_t;
 
 typedef struct stfl_meta stfl_meta_t;
+
+typedef struct merkle_meta merkle_meta_t;
 
 /*%
  * Indicate whether a DST context will be used for signing
@@ -112,6 +115,12 @@ struct dst_key {
 			isc_mutex_t lock;
 			stfl_meta_t *meta;
 		} oqs_stfl_keypair;
+		struct {
+			merkle_meta_t *meta;
+			SAQ_merkle_stream_t *tree;
+			isc_buffer_t *root_hash;
+			isc_mutex_t lock;
+		} saq_merkle_tree;
 	} keydata; /*%< pointer to key in crypto pkg fmt */
 
 	isc_stdtime_t times[DST_MAX_TIMES + 1]; /*%< timing metadata */
@@ -173,6 +182,7 @@ struct dst_func {
 	 * Key operations
 	 */
 	isc_result_t (*sign)(dst_context_t *dctx, isc_buffer_t *sig);
+	isc_result_t (*finalizesignature)(const dst_key_t *key, isc_region_t intsig, isc_buffer_t *finalsig);
 	isc_result_t (*verify)(dst_context_t *dctx, const isc_region_t *sig);
 	isc_result_t (*verify2)(dst_context_t *dctx, int maxbits,
 				const isc_region_t *sig);
@@ -183,6 +193,7 @@ struct dst_func {
 	bool (*paramcompare)(const dst_key_t *key1, const dst_key_t *key2);
 	isc_result_t (*generate)(dst_key_t *key, int parms,
 				 void (*callback)(int));
+	isc_result_t (*finalizekey)(dst_key_t *key);
 	bool (*isprivate)(const dst_key_t *key);
 	void (*destroy)(dst_key_t *key);
 
@@ -236,6 +247,8 @@ isc_result_t
 dst__openssloqs_init(struct dst_func **funcp);
 isc_result_t
 dst__liboqsstateful_init(struct dst_func **funcp);
+isc_result_t
+dst__saqmerkle_init(struct dst_func **funcp);
 
 /*%
  * Destructors
