@@ -403,7 +403,7 @@ dns_kasp_addkey(dns_kasp_t *kasp, dns_kasp_key_t *key) {
 isc_result_t
 dns_kasp_key_create(dns_kasp_t *kasp, dns_kasp_key_t **keyp) {
 	dns_kasp_key_t *key = NULL;
-	dns_kasp_key_t k = { .tag_max = 0xffff, .length = -1 };
+	dns_kasp_key_t k = { .tag_max = 0xffff, .param = -1 };
 
 	REQUIRE(DNS_KASP_VALID(kasp));
 	REQUIRE(keyp != NULL && *keyp == NULL);

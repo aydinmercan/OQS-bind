@@ -341,7 +341,7 @@ openssloqs_generate(dst_key_t *key, int unused, void (*callback)(int)) {
 
 	ctx = EVP_PKEY_CTX_new_from_name(NULL, alginfo->alg_name, NULL);
 	if (ctx == NULL) {
-		return (dst__openssl_toresult2("EVP_PKEY_CTX_new_id",
+		return (dst__openssl_toresult2("EVP_PKEY_CTX_new_from_name",
 					       DST_R_OPENSSLFAILURE));
 	}
 

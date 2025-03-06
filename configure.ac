@@ -790,6 +790,13 @@ AX_RESTORE_FLAGS([openssl])
 AC_SUBST([OPENSSL_CFLAGS])
 AC_SUBST([OPENSSL_LIBS])
 
+PKG_CHECK_MODULES([LIBOQS], [liboqs >= 0.12.0],
+					     [AC_DEFINE([HAVE_LIBOQS], [1], [Build with liboqs])],
+					     [AC_MSG_ERROR(m4_normalize([liboqs not found
+									 Either install liboqs or use regular BIND.]))])
+
+AM_CONDITIONAL([HAVE_LIBOQS], [test -n "$LIBOQS_LIBS"])
+
 AC_CHECK_FUNCS([clock_gettime])
 
 # [pairwise: --with-gssapi=yes, --with-gssapi=auto, --without-gssapi]
