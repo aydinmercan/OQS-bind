@@ -18,21 +18,20 @@
 #include <stdbool.h>
 #include <sys/un.h>
 
+#include <isc/hash.h>
 #include <isc/lang.h>
 #include <isc/net.h>
 #include <isc/types.h>
 
 /*
  * Any updates to this structure should also be applied in
- * contrib/modules/dlz/dlz_minmal.h.
+ * https://gitlab.isc.org/isc-projects/dlz-modules/-/raw/main/modules/include/dlz_minimal.h
  */
 struct isc_sockaddr {
 	union {
-		struct sockaddr		sa;
-		struct sockaddr_in	sin;
-		struct sockaddr_in6	sin6;
-		struct sockaddr_storage ss;
-		struct sockaddr_un	sunix;
+		struct sockaddr	    sa;
+		struct sockaddr_in  sin;
+		struct sockaddr_in6 sin6;
 	} type;
 	unsigned int length; /* XXXRTH beginning? */
 	ISC_LINK(struct isc_sockaddr) link;
@@ -85,7 +84,16 @@ isc_sockaddr_eqaddrprefix(const isc_sockaddr_t *a, const isc_sockaddr_t *b,
  * If 'b''s scope is zero then 'a''s scope will be ignored.
  */
 
-unsigned int
+void
+isc_sockaddr_hash_ex(isc_hash32_t *hash, const isc_sockaddr_t *sockaddr,
+		     bool address_only);
+/*%<
+ * Add the hash of the sockaddr into the hash for incremental hashing
+ *
+ * See isc_sockaddr_hash() for details.
+ */
+
+uint32_t
 isc_sockaddr_hash(const isc_sockaddr_t *sockaddr, bool address_only);
 /*%<
  * Return a hash value for the socket address 'sockaddr'.  If 'address_only'
@@ -224,17 +232,6 @@ isc_sockaddr_isnetzero(const isc_sockaddr_t *sa);
  */
 
 isc_result_t
-isc_sockaddr_frompath(isc_sockaddr_t *sockaddr, const char *path);
-/*
- *  Create a UNIX domain sockaddr that refers to path.
- *
- * Returns:
- * \li	ISC_R_NOSPACE
- * \li	ISC_R_NOTIMPLEMENTED
- * \li	ISC_R_SUCCESS
- */
-
-isc_result_t
 isc_sockaddr_fromsockaddr(isc_sockaddr_t *isa, const struct sockaddr *sa);
 
 #define ISC_SOCKADDR_FORMATSIZE                                            \
@@ -242,6 +239,13 @@ isc_sockaddr_fromsockaddr(isc_sockaddr_t *isa, const struct sockaddr *sa);
 	       "YYYYY")
 /*%<
  * Minimum size of array to pass to isc_sockaddr_format().
+ */
+
+bool
+isc_sockaddr_disabled(const isc_sockaddr_t *sockaddr);
+/*%<
+ * Report whether or not the address family of 'sockaddr'
+ * has been disabled.
  */
 
 ISC_LANG_ENDDECLS

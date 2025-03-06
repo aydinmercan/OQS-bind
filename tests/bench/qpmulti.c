@@ -102,7 +102,7 @@ item_makekey(dns_qpkey_t key, void *ctx, void *pval, uint32_t ival) {
 	UNUSED(ctx);
 	UNUSED(pval);
 	memmove(key, item[ival].key, item[ival].len);
-	return (item[ival].len);
+	return item[ival].len;
 }
 
 static void
@@ -120,13 +120,11 @@ const dns_qpmethods_t item_methods = {
 
 static uint8_t
 random_byte(void) {
-	return (isc_random_uniform(SHIFT_OFFSET - SHIFT_NOBYTE) + SHIFT_NOBYTE);
+	return isc_random_uniform(SHIFT_OFFSET - SHIFT_NOBYTE) + SHIFT_NOBYTE;
 }
 
 static void
 init_items(isc_mem_t *mctx) {
-	void *pval = NULL;
-	uint32_t ival = ~0U;
 	dns_qp_t *qp = NULL;
 	uint64_t start;
 
@@ -143,8 +141,8 @@ init_items(isc_mem_t *mctx) {
 				item[i].key[off] = random_byte();
 			}
 			item[i].key[len] = SHIFT_NOBYTE;
-		} while (dns_qp_getkey(qp, item[i].key, item[i].len, &pval,
-				       &ival) == ISC_R_SUCCESS);
+		} while (dns_qp_getkey(qp, item[i].key, item[i].len, NULL,
+				       NULL) == ISC_R_SUCCESS);
 		INSIST(dns_qp_insert(qp, &item[i], i) == ISC_R_SUCCESS);
 	}
 	dns_qp_destroy(&qp);
@@ -190,8 +188,8 @@ struct thread_args {
 	struct bench_state *bctx; /* (in) */
 	isc_barrier_t *barrier;	  /* (in) */
 	isc_loopmgr_t *loopmgr;	  /* (in) */
-	uv_idle_t handle;	  /* (in) */
-	uv_idle_cb cb;		  /* (in) */
+	isc_job_t job;		  /* (in) */
+	isc_job_cb cb;		  /* (in) */
 	dns_qpmulti_t *multi;	  /* (in) */
 	double zipf_skew;	  /* (in) */
 	uint32_t max_item;	  /* (in) */
@@ -209,11 +207,9 @@ struct thread_args {
 static void
 first_loop(void *varg) {
 	struct thread_args *args = varg;
-	isc_loop_t *loop = isc_loop_current(args->loopmgr);
+	isc_loop_t *loop = isc_loop();
 
-	uv_idle_init(&loop->loop, &args->handle);
-	uv_idle_start(&args->handle, args->cb);
-	args->handle.data = args;
+	isc_job_run(loop, &args->job, args->cb, args);
 
 	isc_barrier_wait(args->barrier);
 	args->start = isc_time_monotonic();
@@ -226,20 +222,17 @@ next_loop(struct thread_args *args, isc_nanosecs_t start) {
 	args->worked += stop - start;
 	args->stop = stop;
 	if (args->stop - args->start < RUNTIME) {
+		isc_job_run(isc_loop(), &args->job, args->cb, args);
 		return;
 	}
-	uv_idle_stop(&args->handle);
-	uv_close(&args->handle, NULL);
 	isc_async_run(isc_loop_main(args->loopmgr), collect, args);
 }
 
 #if ZIPF
 static void
-read_zipf(uv_idle_t *idle) {
-	struct thread_args *args = idle->data;
+read_zipf(void *varg) {
+	struct thread_args *args = varg;
 	isc_nanosecs_t start;
-	void *pval = NULL;
-	uint32_t ival;
 
 	/* outside time because it is v slow */
 	uint32_t r[args->tx_per_loop][args->ops_per_tx];
@@ -257,7 +250,7 @@ read_zipf(uv_idle_t *idle) {
 		for (uint32_t op = 0; op < args->ops_per_tx; op++) {
 			uint32_t i = r[tx][op];
 			isc_result_t result = dns_qp_getkey(
-				&qp, item[i].key, item[i].len, &pval, &ival);
+				&qp, item[i].key, item[i].len, NULL, NULL);
 			if (result == ISC_R_SUCCESS) {
 				args->present++;
 			} else {
@@ -273,11 +266,9 @@ read_zipf(uv_idle_t *idle) {
 #endif
 
 static void
-read_transactions(uv_idle_t *idle) {
-	struct thread_args *args = idle->data;
+read_transactions(void *varg) {
+	struct thread_args *args = varg;
 	isc_nanosecs_t start = isc_time_monotonic();
-	void *pval = NULL;
-	uint32_t ival;
 
 	for (uint32_t tx = 0; tx < args->tx_per_loop; tx++) {
 		args->transactions++;
@@ -286,7 +277,7 @@ read_transactions(uv_idle_t *idle) {
 		for (uint32_t op = 0; op < args->ops_per_tx; op++) {
 			uint32_t i = isc_random_uniform(args->max_item);
 			isc_result_t result = dns_qp_getkey(
-				&qp, item[i].key, item[i].len, &pval, &ival);
+				&qp, item[i].key, item[i].len, NULL, NULL);
 			if (result == ISC_R_SUCCESS) {
 				args->present++;
 			} else {
@@ -299,8 +290,8 @@ read_transactions(uv_idle_t *idle) {
 }
 
 static void
-mutate_transactions(uv_idle_t *idle) {
-	struct thread_args *args = idle->data;
+mutate_transactions(void *varg) {
+	struct thread_args *args = varg;
 	isc_nanosecs_t start = isc_time_monotonic();
 
 	for (uint32_t tx = 0; tx < args->tx_per_loop; tx++) {
@@ -474,6 +465,7 @@ dispatch(struct bench_state *bctx) {
 		bctx->max_item = 10;
 		load_multi(bctx);
 		break;
+
 	case vary_max_items_rw:
 		if (bctx->max_item == ITEM_COUNT) {
 			goto init_max_items_ro;
@@ -732,6 +724,7 @@ dispatch(struct bench_state *bctx) {
 			.cb = zipf  ? read_zipf
 			      : mut ? mutate_transactions
 				    : read_transactions,
+			.job = ISC_JOB_INITIALIZER,
 			.ops_per_tx = mut ? bctx->mut_ops_per_tx
 					  : bctx->read_ops_per_tx,
 			.tx_per_loop = mut ? bctx->mut_tx_per_loop
@@ -815,7 +808,7 @@ collect(void *varg) {
 static void
 startup(void *arg) {
 	isc_loopmgr_t *loopmgr = arg;
-	isc_loop_t *loop = isc_loop_current(loopmgr);
+	isc_loop_t *loop = isc_loop();
 	isc_mem_t *mctx = isc_loop_getmctx(loop);
 	uint32_t nloops = isc_loopmgr_nloops(loopmgr);
 	size_t bytes = sizeof(struct bench_state) +
@@ -847,7 +840,7 @@ tick(void *varg) {
 static void
 start_ticker(void *varg) {
 	struct ticker *ticker = varg;
-	isc_loop_t *loop = isc_loop_current(ticker->loopmgr);
+	isc_loop_t *loop = isc_loop();
 
 	isc_timer_create(loop, tick, NULL, &ticker->timer);
 	isc_timer_start(ticker->timer, isc_timertype_ticker,
@@ -914,5 +907,5 @@ main(void) {
 	isc_mem_checkdestroyed(stdout);
 	isc_mem_destroy(&mctx);
 
-	return (0);
+	return 0;
 }

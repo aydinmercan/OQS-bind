@@ -11,6 +11,7 @@
 # information regarding copyright ownership.
 ############################################################################
 
+import glob
 import os
 import re
 
@@ -22,11 +23,13 @@ import gitlab
 def added_lines(target_branch, paths):
     import subprocess
 
-    subprocess.check_output(
-        ["/usr/bin/git", "fetch", "--depth", "1", "origin", target_branch]
-    )
+    # Hazard fetches the target branch itself, so there is no need to fetch it
+    # explicitly using `git fetch --depth 1000 origin <target_branch>`.  The
+    # refs/remotes/origin/<target_branch> ref is also expected to be readily
+    # usable by the time this file is executed.
+
     diff = subprocess.check_output(
-        ["/usr/bin/git", "diff", "FETCH_HEAD..", "--"] + paths
+        ["/usr/bin/git", "diff", f"origin/{target_branch}...", "--"] + paths
     )
     added_lines = []
     for line in diff.splitlines():
@@ -40,21 +43,73 @@ def lines_containing(lines, string):
 
 
 changes_issue_or_mr_id_regex = re.compile(rb"\[(GL [#!]|RT #)[0-9]+\]")
-relnotes_issue_or_mr_id_regex = re.compile(rb":gl:`[#!][0-9]+`")
-release_notes_regex = re.compile(r"doc/(arm|notes)/notes-.*\.(rst|xml)")
+rdata_regex = re.compile(r"lib/dns/rdata/")
+mr_issue_link_regex = re.compile(r"^(Closes|Fixes):?\s*[^\n]*#[0-9]+", re.MULTILINE)
 
 modified_files = danger.git.modified_files
+affected_files = (
+    danger.git.modified_files + danger.git.created_files + danger.git.deleted_files
+)
+mr_title = re.sub(r"^Draft:\s*", r"", danger.gitlab.mr.title)
 mr_labels = danger.gitlab.mr.labels
+source_branch = danger.gitlab.mr.source_branch
 target_branch = danger.gitlab.mr.target_branch
 is_backport = "Backport" in mr_labels or "Backport::Partial" in mr_labels
 is_full_backport = is_backport and "Backport::Partial" not in mr_labels
 
 gl = gitlab.Gitlab(
     url=f"https://{os.environ['CI_SERVER_HOST']}",
-    private_token=os.environ["DANGER_GITLAB_API_TOKEN"],
+    private_token=os.environ["BIND_TEAM_API_TOKEN"],
 )
 proj = gl.projects.get(os.environ["CI_PROJECT_ID"])
 mr = proj.mergerequests.get(os.environ["CI_MERGE_REQUEST_IID"])
+
+###############################################################################
+# MERGE REQUEST INFORMATION
+###############################################################################
+#
+# - FAIL if the MR title doesn't have the expected format
+#
+# - FAIL if the MR title doesn't contain changelog action
+#
+# - FAIL if the MR title doesn't contain changelog audience
+
+MR_TITLE_RE = re.compile(
+    r"^(\[9\.[0-9]{2}(-S)?\])?\s*(\[[^]]*\]\s*)?((chg|fix|new|rem|sec):)?\s*((dev|usr|pkg|doc|test|ci|nil)\s*:)?\s*([^\n]*)$",
+)
+mr_title_match = MR_TITLE_RE.match(mr_title)
+mr_title_cve = mr_title_match.group(3) if mr_title_match else None
+mr_title_action = mr_title_match.group(5) if mr_title_match else None
+mr_title_audience = mr_title_match.group(7) if mr_title_match else None
+
+if not mr_title_match:
+    fail("Merge request's title is invalid. Fix it or contact QA for assistance.")
+else:
+    if mr_title_action is None:
+        fail(
+            "Add one of `chg:`|`fix:`|`new:`|`rem:`|`sec:` to the MR title to [categorize this change](https://gitlab.isc.org/isc-projects/bind9/-/wikis/BIND-development-workflow#mr-title)."
+        )
+    if mr_title_audience is None:
+        fail(
+            "Add one of `dev:`|`usr:`|`pkg:`|`doc:`|`test:`|`ci:`|`nil:` to the MR title as [intended audience](https://gitlab.isc.org/isc-projects/bind9/-/wikis/BIND-development-workflow#mr-title)."
+        )
+
+###############################################################################
+# BRANCH NAME
+###############################################################################
+#
+# - FAIL if the source branch of the merge request includes an old-style
+#   "-v9_x" or "-v9.x" suffix.
+
+branch_name_regex = r"^(?P<base>.*?)(?P<suffix>-v9[_.](?P<version>[0-9]+))$"
+match = re.match(branch_name_regex, source_branch)
+if match:
+    fail(
+        f"Source branch name `{source_branch}` includes an old-style version "
+        f"suffix (`{match.group('suffix')}`). Using such suffixes is now "
+        "deprecated. Please resubmit the merge request with the branch name "
+        f"set to `{match.group('base')}-bind-9.{match.group('version')}`."
+    )
 
 ###############################################################################
 # COMMIT MESSAGES
@@ -66,6 +121,8 @@ mr = proj.mergerequests.get(os.environ["CI_MERGE_REQUEST_IID"])
 #
 #     * The subject line starts with a prohibited word indicating a work in
 #       progress commit (e.g. "WIP").
+#
+#     * The subject line contains a changelog action.
 #
 #     * The subject line contains a trailing dot.
 #
@@ -99,11 +156,13 @@ fixup_error_logged = False
 for commit in danger.git.commits:
     message_lines = commit.message.splitlines()
     subject = message_lines[0]
-    if not fixup_error_logged and (
+    is_merge = len(commit.parents) >= 2
+    is_fixup = (
         subject.startswith("fixup!")
         or subject.startswith("amend!")
         or subject.startswith("Apply suggestion")
-    ):
+    )
+    if not fixup_error_logged and is_fixup:
         fail(
             "Fixup commits are still present in this merge request. "
             "Please squash them before merging."
@@ -115,7 +174,13 @@ for commit in danger.git.commits:
             f"Prohibited keyword `{match.groups()[0]}` detected "
             f"at the start of a subject line in commit {commit.sha}."
         )
-    if len(subject) > 72 and not subject.startswith("Merge branch "):
+    match = MR_TITLE_RE.match(subject)
+    if match and match.group(5) is not None and not is_merge:
+        fail(
+            f"Changelog action `{match.group(5)}` detected in non-merge"
+            f"commit {commit.sha}. Use MR title instead."
+        )
+    if len(subject) > 72 and not is_merge and not is_fixup:
         warn(
             f"Subject line for commit {commit.sha} is too long: "
             f"```{subject}``` ({len(subject)} > 72 characters)."
@@ -144,19 +209,13 @@ for commit in danger.git.commits:
             )
 
 ###############################################################################
-# MILESTONE
-###############################################################################
-#
-# FAIL if the merge request is not assigned to any milestone.
-
-if not danger.gitlab.mr.milestone:
-    fail("Please assign this merge request to a milestone.")
-
-###############################################################################
 # BACKPORT & VERSION LABELS
 ###############################################################################
 #
 # FAIL if any of the following is true for the merge request:
+#
+# * The MR has any "Affects v9.x" label(s) set.  These should only be used for
+#   issues.
 #
 # * The MR is marked as Backport and the number of version labels set is
 #   different than 1.  (For backports, the version label is used for indicating
@@ -178,9 +237,13 @@ BACKPORT_OF_RE = re.compile(
     r"Backport\s+of.*(merge_requests/|!)([0-9]+)", flags=re.IGNORECASE
 )
 VERSION_LABEL_RE = re.compile(r"v9.([0-9]+)(-S)?")
-backport_desc = BACKPORT_OF_RE.search(danger.gitlab.mr.description)
 version_labels = [l for l in mr_labels if l.startswith("v9.")]
 affects_labels = [l for l in mr_labels if l.startswith("Affects v9.")]
+if affects_labels:
+    fail(
+        "This MR is marked with at least one *Affects v9.x* label. "
+        "Please remove them as they should only be used for issues."
+    )
 if is_backport:
     if len(version_labels) != 1:
         fail(
@@ -191,12 +254,13 @@ if is_backport:
         minor_ver, edition = VERSION_LABEL_RE.search(version_labels[0]).groups()
         edition = "" if edition is None else edition
         title_re = f"^\\[9.{minor_ver}{edition}\\]"
-        match = re.search(title_re, danger.gitlab.mr.title)
+        match = re.search(title_re, mr_title)
         if match is None:
             fail(
                 "Backport MRs must have their target version in the title. "
                 f"Please put `[9.{minor_ver}{edition}]` at the start of the MR title."
             )
+    backport_desc = BACKPORT_OF_RE.search(danger.gitlab.mr.description or "")
     if backport_desc is None:
         fail(
             "Backport MRs must link to the original MR. Please put "
@@ -239,11 +303,6 @@ else:
             "a single version label (*v9.x*) indicating the target branch. "
             "If not, set version labels for all targeted backport branches."
         )
-    if not affects_labels:
-        warn(
-            "Set `Affects v9.` label(s) for all versions that are affected by "
-            "the issue which this MR addresses."
-        )
 
 ###############################################################################
 # OTHER LABELS
@@ -270,52 +329,6 @@ elif not approved:
     )
 
 ###############################################################################
-# 'CHANGES' FILE
-###############################################################################
-#
-# FAIL if any of the following is true:
-#
-# * The merge request does not update the CHANGES file, but it does not have
-#   the "No CHANGES" label set.  (This attempts to ensure that the author of
-#   the MR did not forget about adding a CHANGES entry.)
-#
-# * The merge request updates the CHANGES file, but it has the "No CHANGES"
-#   label set.  (This attempts to ensure that the "No CHANGES" label is used in
-#   a sane way.)
-#
-# * The merge request adds any placeholder entries to the CHANGES file, but it
-#   does not target the "main" branch.
-#
-# * The merge request adds a new CHANGES entry that is not a placeholder and
-#   does not contain any GitLab/RT issue/MR identifiers.
-
-changes_modified = "CHANGES" in modified_files or "CHANGES.SE" in modified_files
-no_changes_label_set = "No CHANGES" in mr_labels
-if not changes_modified and not no_changes_label_set:
-    fail(
-        "This merge request does not modify `CHANGES`. "
-        "Add a `CHANGES` entry or set the *No CHANGES* label."
-    )
-if changes_modified and no_changes_label_set:
-    fail(
-        "This merge request modifies `CHANGES`. "
-        "Revert `CHANGES` modifications or unset the *No Changes* label."
-    )
-
-changes_added_lines = added_lines(target_branch, ["CHANGES", "CHANGES.SE"])
-placeholders_added = lines_containing(changes_added_lines, "[placeholder]")
-identifiers_found = filter(changes_issue_or_mr_id_regex.search, changes_added_lines)
-if changes_added_lines:
-    if placeholders_added:
-        if target_branch != "main":
-            fail(
-                "This MR adds at least one placeholder entry to `CHANGES`. "
-                "It should be targeting the `main` branch."
-            )
-    elif not any(identifiers_found):
-        fail("No valid issue/MR identifiers found in added `CHANGES` entries.")
-
-###############################################################################
 # RELEASE NOTES
 ###############################################################################
 #
@@ -328,63 +341,61 @@ if changes_added_lines:
 #       Notes" label set.  (This ensures that merge requests updating release
 #       notes can be easily found using the "Release Notes" label.)
 #
+#     * A file was added to or deleted from the lib/dns/rdata/ subdirectory but
+#       release notes were not modified. This is probably a mistake because new
+#       RR types are a user-visible change (and so is removing support for
+#       existing ones).
+#
+#     * "Release notes" and "No CHANGES" labels are both set at the same time.
+#       (If something is worth a release note, it should surely show up in
+#       CHANGES.) MRs with certain labels set ("Documentation", "Release") are
+#       exempt because these are typically used during release process.
+#
 # - WARN if any of the following is true:
 #
 #     * This merge request does not update release notes and has the "Customer"
 #       label set.  (Except for trivial changes, all merge requests which may
 #       be of interest to customers should include a release note.)
 #
-#     * This merge request updates release notes, but no GitLab/RT issue/MR
-#       identifiers are found in the lines added to the release notes by this
-#       MR.
+#     * This merge request updates release notes, but no GitLab issue was
+#       linked with the `Closes` or `Fixes` keyword in the MR description.
 
-release_notes_regex = re.compile(r"doc/(arm|notes)/notes-.*\.(rst|xml)")
-release_notes_changed = list(filter(release_notes_regex.match, modified_files))
-release_notes_label_set = "Release Notes" in mr_labels
+release_notes_changed = mr_title_audience in ["usr", "pkg"]
 if not release_notes_changed:
-    if release_notes_label_set:
-        fail(
-            "This merge request has the *Release Notes* label set. "
-            "Add a release note or unset the *Release Notes* label."
-        )
-    elif "Customer" in mr_labels:
+    if "Customer" in mr_labels and not release_notes_changed:
         warn(
             "This merge request has the *Customer* label set. "
-            "Add a release note unless the changes introduced are trivial."
+            "Update the MR title to include `usr:`|`pkg:` audience "
+            "unless the changes introduced are trivial."
         )
-if release_notes_changed and not release_notes_label_set:
-    fail(
-        "This merge request modifies release notes. "
-        "Revert release note modifications or set the *Release Notes* label."
+    rdata_types_add_rm = list(
+        filter(rdata_regex.match, danger.git.created_files + danger.git.deleted_files)
     )
+    if rdata_types_add_rm:
+        fail(
+            "This merge request adds new files to `lib/dns/rdata/` and/or "
+            "deletes existing files from that directory, which almost certainly "
+            "means that it adds support for a new RR type or removes support "
+            "for an existing one. Update the MR title to include `usr:` audience."
+        )
 
-if release_notes_changed:
-    notes_added_lines = added_lines(target_branch, release_notes_changed)
-    identifiers_found = filter(relnotes_issue_or_mr_id_regex.search, notes_added_lines)
-    if notes_added_lines and not any(identifiers_found):
-        warn("No valid issue/MR identifiers found in added release notes.")
-else:
-    notes_added_lines = []
+if release_notes_changed and not mr_issue_link_regex.search(
+    danger.gitlab.mr.description
+):
+    warn("No issue was linked via `Closes`|`Fixes` in the MR description.")
 
 ###############################################################################
 # CVE IDENTIFIERS
 ###############################################################################
 #
-# FAIL if the merge request adds a CHANGES entry of type [security] and a CVE
-# identifier is missing from either the added CHANGES entry or the added
-# release note.
+# WARN if the merge request title indicates a security issue, but there is no
+# CVE identifier in the MR title.
 
-if lines_containing(changes_added_lines, "[security]"):
-    if not lines_containing(changes_added_lines, "(CVE-20"):
-        fail(
-            "This merge request fixes a security issue. "
-            "Please add a CHANGES entry which includes a CVE identifier."
-        )
-    if not lines_containing(notes_added_lines, "CVE-20"):
-        fail(
-            "This merge request fixes a security issue. "
-            "Please add a release note which includes a CVE identifier."
-        )
+if mr_title_action == "sec" and (mr_title_cve is None or "CVE-20" not in mr_title_cve):
+    warn(
+        "This merge request fixes a security issue. "
+        "Please add `[CVE-XXXX-YYYY]` to the MR title if a CVE was issued."
+    )
 
 ###############################################################################
 # PAIRWISE TESTING
@@ -413,6 +424,25 @@ if switches_added:
         )
 
 ###############################################################################
+# PRE-RELEASE TESTING
+###############################################################################
+#
+# WARN if the merge request is marked with the "Security" label, but not with
+# the label used for marking merge requests for pre-release testing (if the
+# latter is defined by the relevant environment variable).
+
+pre_release_testing_label = os.getenv("PRE_RELEASE_TESTING_LABEL")
+if (
+    pre_release_testing_label
+    and "Security" in mr_labels
+    and pre_release_testing_label not in mr_labels
+):
+    warn(
+        "This merge request is marked with the *Security* label, but it is not "
+        f"marked for pre-release testing (*{pre_release_testing_label}*)."
+    )
+
+###############################################################################
 # USER-VISIBLE LOG LEVELS
 ###############################################################################
 #
@@ -434,3 +464,46 @@ for log_level in user_visible_log_levels:
             "sure none of the messages added is a leftover debug message."
         )
         break
+
+###############################################################################
+# SYSTEM TEST FILES
+###############################################################################
+#
+# FAIL if newly added system test directory contains an underscore (invalid char)
+# FAIL if there are no pytest files in the system test directory
+# FAIL if the pytest glue file for tests.sh is missing
+
+TESTNAME_CANDIDATE_RE = re.compile(r"bin/tests/system/([^/]+)")
+testnames = set()
+for path in affected_files:
+    match = TESTNAME_CANDIDATE_RE.search(path)
+    if match is not None:
+        testnames.add(match.groups()[0])
+
+for testname in testnames:
+    dirpath = f"bin/tests/system/{testname}"
+    if (
+        not os.path.isdir(dirpath)
+        or testname.startswith(".")
+        or testname.startswith("_")
+        or testname == "isctest"
+    ):
+        continue
+    if "_" in testname:
+        fail(
+            f"System test directory `{testname}` may not contain an underscore, "
+            "use hyphen instead."
+        )
+    if not glob.glob(f"{dirpath}/**/tests_*.py", recursive=True):
+        fail(
+            f"System test directory `{testname}` doesn't contain any "
+            "`tests_*.py` pytest file."
+        )
+    tests_sh_exists = os.path.exists(f"{dirpath}/tests.sh")
+    glue_file_name = f"tests_sh_{testname.replace('-', '_')}.py"
+    tests_sh_py_exists = os.path.exists(f"{dirpath}/{glue_file_name}")
+    if tests_sh_exists and not tests_sh_py_exists:
+        fail(
+            f"System test directory `{testname}` is missing the "
+            f"`{glue_file_name}` pytest glue file."
+        )

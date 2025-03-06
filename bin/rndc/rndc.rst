@@ -257,6 +257,11 @@ Currently supported commands are:
 
    See also :option:`rndc stop`.
 
+.. option:: skr -import file zone [class [view]]
+
+   This command allows you to import a SKR file for the specified zone, to
+   support offline KSK signing.
+
 .. option:: loadkeys [zone [class [view]]]
 
    This command fetches all DNSSEC keys for the given zone from the key directory. If
@@ -307,6 +312,19 @@ Currently supported commands are:
       also be used, for example, to jumpstart the acquisition of new
       keys in the event of a trust anchor rollover, or as a brute-force
       repair for key maintenance problems.
+
+.. option:: memprof [(on | off | dump)]
+
+   This command controls memory profiling. To have any effect, :iscman:`named` must be
+   built with jemalloc, the library have profiling support enabled and run with the
+   ``prof:true`` allocator configuration. (either via ``MALLOC_CONF`` or ``/etc/malloc.conf``)
+
+   The ``prof_active:false`` option is recommended to ensure the profiling overhead does
+   not affect :iscman:`named` when not needed.
+
+   The ``on`` and ``off`` options will start and stop the jemalloc memory profiling respectively.
+   When run with the `dump` option, :iscman:`named` will dump the profile to the working
+   directory. The name will be chosen automatically by jemalloc.
 
 .. option:: modzone zone [class [view]] configuration
 
@@ -440,17 +458,31 @@ Currently supported commands are:
    .. option:: zone [class [view]]
 
    If a zone is specified, this command reloads only the given zone.
+   If no zone is specified, the reloading happens asynchronously.
 
 .. program:: rndc
 
-.. option:: retransfer zone [class [view]]
+.. option:: responselog [on | off]
+
+   This command enables or disables response logging. For backward compatibility,
+   this command can also be used without an argument to toggle response logging
+   on and off.
+
+   Unlike query logging, response logging cannot be enabled by explicitly directing
+   the ``responses`` ``category`` to a ``channel`` in the ``logging`` section
+   of :iscman:`named.conf`, but it can still be enabled by specifying
+   ``responselog yes;`` in the ``options`` section of :iscman:`named.conf`.
+
+.. option:: retransfer [-force] zone [class [view]]
 
    This command retransfers the given secondary zone from the primary server.
 
    If the zone is configured to use ``inline-signing``, the signed
    version of the zone is discarded; after the retransfer of the
    unsigned version is complete, the signed version is regenerated
-   with new signatures.
+   with new signatures. With the optional ``-force`` argument provided
+   if there is an ongoing zone transfer it will be aborted before a new zone
+   transfer is scheduled.
 
 .. option:: scan
 
@@ -604,7 +636,8 @@ Currently supported commands are:
    refused. If the zone has changed and the ``ixfr-from-differences``
    option is in use, the journal file is updated to reflect
    changes in the zone. Otherwise, if the zone has changed, any existing
-   journal file is removed.
+   journal file is removed.  If no zone is specified, the reloading happens
+   asynchronously.
 
    See also :option:`rndc freeze`.
 

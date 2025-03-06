@@ -79,7 +79,7 @@ usage(void) {
 		"%s zonename [ (filename|-) ]\n",
 		prog_name,
 		progmode == progmode_check ? "[-o filename]" : "-o filename");
-	exit(1);
+	exit(EXIT_FAILURE);
 }
 
 static void
@@ -147,15 +147,12 @@ main(int argc, char **argv) {
 		UNREACHABLE();
 	}
 
-	/* Compilation specific defaults */
+	/* When compiling, disable checks by default */
 	if (progmode == progmode_compile) {
-		zone_options |= (DNS_ZONEOPT_CHECKNS | DNS_ZONEOPT_FATALNS |
-				 DNS_ZONEOPT_CHECKSPF | DNS_ZONEOPT_CHECKDUPRR |
-				 DNS_ZONEOPT_CHECKNAMES |
-				 DNS_ZONEOPT_CHECKNAMESFAIL |
-				 DNS_ZONEOPT_CHECKWILDCARD);
-	} else {
-		zone_options |= (DNS_ZONEOPT_CHECKDUPRR | DNS_ZONEOPT_CHECKSPF);
+		zone_options = 0;
+		docheckmx = false;
+		docheckns = false;
+		dochecksrv = false;
 	}
 
 #define ARGCMP(X) (strcmp(isc_commandline_argument, X) == 0)
@@ -209,7 +206,7 @@ main(int argc, char **argv) {
 			} else {
 				fprintf(stderr, "invalid argument to -i: %s\n",
 					isc_commandline_argument);
-				exit(1);
+				exit(EXIT_FAILURE);
 			}
 			break;
 
@@ -243,7 +240,7 @@ main(int argc, char **argv) {
 			} else {
 				fprintf(stderr, "invalid argument to -k: %s\n",
 					isc_commandline_argument);
-				exit(1);
+				exit(EXIT_FAILURE);
 			}
 			break;
 
@@ -254,7 +251,7 @@ main(int argc, char **argv) {
 			if (*endp != '\0') {
 				fprintf(stderr, "source serial number "
 						"must be numeric");
-				exit(1);
+				exit(EXIT_FAILURE);
 			}
 			break;
 
@@ -265,7 +262,7 @@ main(int argc, char **argv) {
 			if (*endp != '\0') {
 				fprintf(stderr, "maximum TTL "
 						"must be numeric");
-				exit(1);
+				exit(EXIT_FAILURE);
 			}
 			break;
 
@@ -282,7 +279,7 @@ main(int argc, char **argv) {
 			} else {
 				fprintf(stderr, "invalid argument to -n: %s\n",
 					isc_commandline_argument);
-				exit(1);
+				exit(EXIT_FAILURE);
 			}
 			break;
 
@@ -299,7 +296,7 @@ main(int argc, char **argv) {
 			} else {
 				fprintf(stderr, "invalid argument to -m: %s\n",
 					isc_commandline_argument);
-				exit(1);
+				exit(EXIT_FAILURE);
 			}
 			break;
 
@@ -324,7 +321,7 @@ main(int argc, char **argv) {
 			} else {
 				fprintf(stderr, "invalid argument to -r: %s\n",
 					isc_commandline_argument);
-				exit(1);
+				exit(EXIT_FAILURE);
 			}
 			break;
 
@@ -337,7 +334,7 @@ main(int argc, char **argv) {
 				fprintf(stderr,
 					"unknown or unsupported style: %s\n",
 					isc_commandline_argument);
-				exit(1);
+				exit(EXIT_FAILURE);
 			}
 			break;
 
@@ -347,13 +344,13 @@ main(int argc, char **argv) {
 				fprintf(stderr, "isc_dir_chroot: %s: %s\n",
 					isc_commandline_argument,
 					isc_result_totext(result));
-				exit(1);
+				exit(EXIT_FAILURE);
 			}
 			break;
 
 		case 'v':
 			printf("%s\n", PACKAGE_VERSION);
-			exit(0);
+			exit(EXIT_SUCCESS);
 
 		case 'w':
 			workdir = isc_commandline_argument;
@@ -367,7 +364,7 @@ main(int argc, char **argv) {
 			} else {
 				fprintf(stderr, "invalid argument to -C: %s\n",
 					isc_commandline_argument);
-				exit(1);
+				exit(EXIT_FAILURE);
 			}
 			break;
 
@@ -388,7 +385,7 @@ main(int argc, char **argv) {
 			} else {
 				fprintf(stderr, "invalid argument to -M: %s\n",
 					isc_commandline_argument);
-				exit(1);
+				exit(EXIT_FAILURE);
 			}
 			break;
 
@@ -405,7 +402,7 @@ main(int argc, char **argv) {
 			} else {
 				fprintf(stderr, "invalid argument to -S: %s\n",
 					isc_commandline_argument);
-				exit(1);
+				exit(EXIT_FAILURE);
 			}
 			break;
 
@@ -417,7 +414,7 @@ main(int argc, char **argv) {
 			} else {
 				fprintf(stderr, "invalid argument to -T: %s\n",
 					isc_commandline_argument);
-				exit(1);
+				exit(EXIT_FAILURE);
 			}
 			break;
 
@@ -441,7 +438,7 @@ main(int argc, char **argv) {
 		default:
 			fprintf(stderr, "%s: unhandled option -%c\n", prog_name,
 				isc_commandline_option);
-			exit(1);
+			exit(EXIT_FAILURE);
 		}
 	}
 
@@ -450,7 +447,7 @@ main(int argc, char **argv) {
 		if (result != ISC_R_SUCCESS) {
 			fprintf(stderr, "isc_dir_chdir: %s: %s\n", workdir,
 				isc_result_totext(result));
-			exit(1);
+			exit(EXIT_FAILURE);
 		}
 	}
 
@@ -466,7 +463,7 @@ main(int argc, char **argv) {
 		} else {
 			fprintf(stderr, "unknown file format: %s\n",
 				inputformatstr);
-			exit(1);
+			exit(EXIT_FAILURE);
 		}
 	}
 
@@ -484,12 +481,12 @@ main(int argc, char **argv) {
 			    rawversion > 1U)
 			{
 				fprintf(stderr, "unknown raw format version\n");
-				exit(1);
+				exit(EXIT_FAILURE);
 			}
 		} else {
 			fprintf(stderr, "unknown file format: %s\n",
 				outputformatstr);
-			exit(1);
+			exit(EXIT_FAILURE);
 		}
 	}
 
@@ -574,5 +571,5 @@ main(int argc, char **argv) {
 	}
 	isc_mem_destroy(&mctx);
 
-	return ((result == ISC_R_SUCCESS) ? 0 : 1);
+	return (result == ISC_R_SUCCESS) ? 0 : 1;
 }

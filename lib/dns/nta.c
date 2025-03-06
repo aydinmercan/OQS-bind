@@ -60,8 +60,7 @@ struct dns__nta {
 	dns_fetch_t *fetch;
 	dns_rdataset_t rdataset;
 	dns_rdataset_t sigrdataset;
-	dns_fixedname_t fn;
-	dns_name_t *name;
+	dns_name_t name;
 	isc_stdtime_t expiry;
 	bool shuttingdown;
 };
@@ -93,7 +92,6 @@ dns__nta_destroy(dns__nta_t *nta) {
 	REQUIRE(nta->timer == NULL);
 
 	nta->magic = 0;
-	isc_refcount_destroy(&nta->references);
 	if (dns_rdataset_isassociated(&nta->rdataset)) {
 		dns_rdataset_disassociate(&nta->rdataset);
 	}
@@ -105,6 +103,7 @@ dns__nta_destroy(dns__nta_t *nta) {
 		dns_resolver_destroyfetch(&nta->fetch);
 	}
 	isc_loop_detach(&nta->loop);
+	dns_name_free(&nta->name, nta->mctx);
 	isc_mem_putanddetach(&nta->mctx, nta, sizeof(*nta));
 }
 
@@ -140,7 +139,6 @@ dns_ntatable_create(dns_view_t *view, isc_loopmgr_t *loopmgr,
 
 static void
 dns__ntatable_destroy(dns_ntatable_t *ntatable) {
-	isc_refcount_destroy(&ntatable->references);
 	ntatable->magic = 0;
 	isc_rwlock_destroy(&ntatable->rwlock);
 	dns_qpmulti_destroy(&ntatable->table);
@@ -181,7 +179,7 @@ fetch_done(void *arg) {
 		dns_db_detach(&resp->db);
 	}
 
-	isc_mem_putanddetach(&resp->mctx, resp, sizeof(*resp));
+	dns_resolver_freefresp(&resp);
 
 	switch (eresult) {
 	case ISC_R_SUCCESS:
@@ -242,9 +240,10 @@ checkbogus(void *arg) {
 
 	dns__nta_ref(nta); /* for dns_resolver_createfetch */
 	result = dns_resolver_createfetch(
-		resolver, nta->name, dns_rdatatype_nsec, NULL, NULL, NULL, NULL,
-		0, DNS_FETCHOPT_NONTA, 0, NULL, nta->loop, fetch_done, nta,
-		&nta->rdataset, &nta->sigrdataset, &nta->fetch);
+		resolver, &nta->name, dns_rdatatype_nsec, NULL, NULL, NULL,
+		NULL, 0, DNS_FETCHOPT_NONTA, 0, NULL, NULL, nta->loop,
+		fetch_done, nta, NULL, &nta->rdataset, &nta->sigrdataset,
+		&nta->fetch);
 	if (result != ISC_R_SUCCESS) {
 		dns__nta_detach(&nta); /* for dns_resolver_createfetch() */
 	}
@@ -280,18 +279,18 @@ nta_create(dns_ntatable_t *ntatable, const dns_name_t *name,
 	nta = isc_mem_get(ntatable->mctx, sizeof(dns__nta_t));
 	*nta = (dns__nta_t){
 		.ntatable = ntatable,
+		.name = DNS_NAME_INITEMPTY,
 		.magic = NTA_MAGIC,
 	};
 	isc_mem_attach(ntatable->mctx, &nta->mctx);
-	isc_loop_attach(isc_loop_current(ntatable->loopmgr), &nta->loop);
+	isc_loop_attach(isc_loop(), &nta->loop);
 
 	dns_rdataset_init(&nta->rdataset);
 	dns_rdataset_init(&nta->sigrdataset);
 
 	isc_refcount_init(&nta->references, 1);
 
-	nta->name = dns_fixedname_initname(&nta->fn);
-	dns_name_copy(name, nta->name);
+	dns_name_dupwithoffsets(name, nta->mctx, &nta->name);
 
 	*target = nta;
 }
@@ -307,7 +306,7 @@ dns_ntatable_add(dns_ntatable_t *ntatable, const dns_name_t *name, bool force,
 	REQUIRE(VALID_NTATABLE(ntatable));
 
 	if (atomic_load(&ntatable->shuttingdown)) {
-		return (ISC_R_SUCCESS);
+		return ISC_R_SUCCESS;
 	}
 
 	RWLOCK(&ntatable->rwlock, isc_rwlocktype_write);
@@ -318,7 +317,7 @@ dns_ntatable_add(dns_ntatable_t *ntatable, const dns_name_t *name, bool force,
 	result = dns_qp_insert(qp, nta, 0);
 	switch (result) {
 	case ISC_R_EXISTS:
-		result = dns_qp_getname(qp, nta->name, &pval, NULL);
+		result = dns_qp_getname(qp, &nta->name, &pval, NULL);
 		if (result == ISC_R_SUCCESS) {
 			/*
 			 * an NTA already existed: throw away the
@@ -344,7 +343,7 @@ dns_ntatable_add(dns_ntatable_t *ntatable, const dns_name_t *name, bool force,
 	dns_qpmulti_commit(ntatable->table, &qp);
 	RWUNLOCK(&ntatable->rwlock, isc_rwlocktype_write);
 
-	return (result);
+	return result;
 }
 
 isc_result_t
@@ -366,7 +365,7 @@ dns_ntatable_delete(dns_ntatable_t *ntatable, const dns_name_t *name) {
 	dns_qp_compact(qp, DNS_QPGC_MAYBE);
 	dns_qpmulti_commit(ntatable->table, &qp);
 
-	return (result);
+	return result;
 }
 
 static void
@@ -381,16 +380,16 @@ delete_expired(void *arg) {
 
 	RWLOCK(&ntatable->rwlock, isc_rwlocktype_write);
 	dns_qpmulti_write(ntatable->table, &qp);
-	result = dns_qp_getname(qp, nta->name, &pval, NULL);
+	result = dns_qp_getname(qp, &nta->name, &pval, NULL);
 	if (result == ISC_R_SUCCESS &&
 	    ((dns__nta_t *)pval)->expiry == nta->expiry && !nta->shuttingdown)
 	{
 		char nb[DNS_NAME_FORMATSIZE];
-		dns_name_format(nta->name, nb, sizeof(nb));
+		dns_name_format(&nta->name, nb, sizeof(nb));
 		isc_log_write(dns_lctx, DNS_LOGCATEGORY_DNSSEC,
 			      DNS_LOGMODULE_NTA, ISC_LOG_INFO,
 			      "deleting expired NTA at %s", nb);
-		dns_qp_deletename(qp, nta->name, NULL, NULL);
+		dns_qp_deletename(qp, &nta->name, NULL, NULL);
 		dns__nta_shutdown(nta);
 		dns__nta_unref(nta);
 	}
@@ -415,7 +414,7 @@ dns_ntatable_covered(dns_ntatable_t *ntatable, isc_stdtime_t now,
 
 	RWLOCK(&ntatable->rwlock, isc_rwlocktype_read);
 	dns_qpmulti_query(ntatable->table, &qpr);
-	result = dns_qp_findname_ancestor(&qpr, name, 0, &pval, NULL);
+	result = dns_qp_lookup(&qpr, name, NULL, NULL, NULL, &pval, NULL);
 	nta = pval;
 
 	switch (result) {
@@ -427,7 +426,7 @@ dns_ntatable_covered(dns_ntatable_t *ntatable, isc_stdtime_t now,
 		 * Found a NTA that's an ancestor of 'name'; we
 		 * now have to make sure 'anchor' isn't below it.
 		 */
-		if (!dns_name_issubdomain(nta->name, anchor)) {
+		if (!dns_name_issubdomain(&nta->name, anchor)) {
 			goto done;
 		}
 		/* Ancestor match */
@@ -441,7 +440,7 @@ dns_ntatable_covered(dns_ntatable_t *ntatable, isc_stdtime_t now,
 		/* NTA is expired */
 		dns__nta_ref(nta);
 		dns_ntatable_ref(nta->ntatable);
-		isc_async_current(nta->ntatable->loopmgr, delete_expired, nta);
+		isc_async_current(delete_expired, nta);
 		goto done;
 	}
 
@@ -449,7 +448,7 @@ dns_ntatable_covered(dns_ntatable_t *ntatable, isc_stdtime_t now,
 done:
 	RWUNLOCK(&ntatable->rwlock, isc_rwlocktype_read);
 	dns_qpread_destroy(ntatable->table, &qpr);
-	return (answer);
+	return answer;
 }
 
 static isc_result_t
@@ -458,11 +457,11 @@ putstr(isc_buffer_t **b, const char *str) {
 
 	result = isc_buffer_reserve(*b, strlen(str));
 	if (result != ISC_R_SUCCESS) {
-		return (result);
+		return result;
 	}
 
 	isc_buffer_putstr(*b, str);
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 isc_result_t
@@ -481,7 +480,7 @@ dns_ntatable_totext(dns_ntatable_t *ntatable, const char *view,
 	dns_qpmulti_query(ntatable->table, &qpr);
 	dns_qpiter_init(&qpr, &iter);
 
-	while (dns_qpiter_next(&iter, &pval, NULL) == ISC_R_SUCCESS) {
+	while (dns_qpiter_next(&iter, NULL, &pval, NULL) == ISC_R_SUCCESS) {
 		dns__nta_t *n = pval;
 		char nbuf[DNS_NAME_FORMATSIZE];
 		char tbuf[ISC_FORMATHTTPTIMESTAMP_SIZE];
@@ -489,7 +488,7 @@ dns_ntatable_totext(dns_ntatable_t *ntatable, const char *view,
 			  sizeof("expired:  \n")];
 		isc_time_t t;
 
-		dns_name_format(n->name, nbuf, sizeof(nbuf));
+		dns_name_format(&n->name, nbuf, sizeof(nbuf));
 
 		if (n->expiry != 0xffffffffU) {
 			/* Normal NTA entries */
@@ -519,7 +518,7 @@ dns_ntatable_totext(dns_ntatable_t *ntatable, const char *view,
 cleanup:
 	dns_qpread_destroy(ntatable->table, &qpr);
 	RWUNLOCK(&ntatable->rwlock, isc_rwlocktype_read);
-	return (result);
+	return result;
 }
 
 isc_result_t
@@ -537,7 +536,7 @@ dns_ntatable_save(dns_ntatable_t *ntatable, FILE *fp) {
 	dns_qpmulti_query(ntatable->table, &qpr);
 	dns_qpiter_init(&qpr, &iter);
 
-	while (dns_qpiter_next(&iter, &pval, NULL) == ISC_R_SUCCESS) {
+	while (dns_qpiter_next(&iter, NULL, &pval, NULL) == ISC_R_SUCCESS) {
 		dns__nta_t *n = pval;
 		isc_buffer_t b;
 		char nbuf[DNS_NAME_FORMATSIZE + 1], tbuf[80];
@@ -551,7 +550,7 @@ dns_ntatable_save(dns_ntatable_t *ntatable, FILE *fp) {
 		}
 
 		isc_buffer_init(&b, nbuf, sizeof(nbuf));
-		result = dns_name_totext(n->name, 0, &b);
+		result = dns_name_totext(&n->name, 0, &b);
 		if (result != ISC_R_SUCCESS) {
 			continue;
 		}
@@ -577,16 +576,18 @@ dns_ntatable_save(dns_ntatable_t *ntatable, FILE *fp) {
 		result = ISC_R_NOTFOUND;
 	}
 
-	return (result);
+	return result;
 }
 
 static void
-dns__nta_shutdown_cb(dns__nta_t *nta) {
+dns__nta_shutdown_cb(void *arg) {
+	dns__nta_t *nta = arg;
+
 	REQUIRE(VALID_NTA(nta));
 
 	if (isc_log_wouldlog(dns_lctx, ISC_LOG_DEBUG(3))) {
 		char nb[DNS_NAME_FORMATSIZE];
-		dns_name_format(nta->name, nb, sizeof(nb));
+		dns_name_format(&nta->name, nb, sizeof(nb));
 		isc_log_write(dns_lctx, DNS_LOGCATEGORY_DNSSEC,
 			      DNS_LOGMODULE_NTA, ISC_LOG_DEBUG(3),
 			      "shutting down NTA %p at %s", nta, nb);
@@ -604,7 +605,7 @@ dns__nta_shutdown(dns__nta_t *nta) {
 	REQUIRE(VALID_NTA(nta));
 
 	dns__nta_ref(nta);
-	isc_async_run(nta->loop, (isc_job_cb)dns__nta_shutdown_cb, nta);
+	isc_async_run(nta->loop, dns__nta_shutdown_cb, nta);
 	nta->shuttingdown = true;
 }
 
@@ -621,7 +622,7 @@ dns_ntatable_shutdown(dns_ntatable_t *ntatable) {
 	ntatable->shuttingdown = true;
 
 	dns_qpiter_init(&qpr, &iter);
-	while (dns_qpiter_next(&iter, &pval, NULL) == ISC_R_SUCCESS) {
+	while (dns_qpiter_next(&iter, NULL, &pval, NULL) == ISC_R_SUCCESS) {
 		dns__nta_t *n = pval;
 		dns__nta_shutdown(n);
 		dns__nta_detach(&n);
@@ -650,7 +651,7 @@ static size_t
 qp_makekey(dns_qpkey_t key, void *uctx ISC_ATTR_UNUSED, void *pval,
 	   uint32_t ival ISC_ATTR_UNUSED) {
 	dns__nta_t *nta = pval;
-	return (dns_qpkey_fromname(key, nta->name));
+	return dns_qpkey_fromname(key, &nta->name);
 }
 
 static void

@@ -28,7 +28,7 @@ options {
 
 zone "." {
 	type hint;
-	file "../../common/root.hint";
+	file "../../_common/root.hint";
 };
 
 zone "sub5.example" {
@@ -39,4 +39,9 @@ zone "sub5.example" {
 zone "signed-sub5.example" {
 	type primary;
 	file "sub.db";
+};
+
+zone "mutt.example" {
+	type primary;
+	file "mutt.db";
 };

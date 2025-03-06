@@ -22,9 +22,14 @@ my $pidf = new IO::File "ans.pid", "w" or die "cannot open pid file: $!";
 print $pidf "$$\n" or die "cannot write pid file: $!";
 $pidf->close or die "cannot close pid file: $!";
 sub rmpid { unlink "ans.pid"; exit 1; };
+sub term { };
 
 $SIG{INT} = \&rmpid;
-$SIG{TERM} = \&rmpid;
+if ($Net::DNS::VERSION > 1.41) {
+    $SIG{TERM} = \&term;
+} else {
+    $SIG{TERM} = \&rmpid;
+}
 
 my $localaddr = "10.53.0.3";
 
@@ -46,22 +51,22 @@ sub reply_handler {
     STDOUT->flush();
 
     if ($qname eq "example.broken") {
-        if ($qtype eq "SOA") {
+	if ($qtype eq "SOA") {
 	    my $rr = new Net::DNS::RR("$qname $ttl $qclass SOA . . 0 0 0 0 0");
 	    push @ans, $rr;
-        } elsif ($qtype eq "NS") {
+	} elsif ($qtype eq "NS") {
 	    my $rr = new Net::DNS::RR("$qname $ttl $qclass NS $nsname");
 	    push @ans, $rr;
 	    $rr = new Net::DNS::RR("$nsname $ttl $qclass A $localaddr");
 	    push @add, $rr;
-        }
-        $rcode = "NOERROR";
+	}
+	$rcode = "NOERROR";
     } elsif ($qname eq "cname-to-$synth2") {
-        my $rr = new Net::DNS::RR("$qname $ttl $qclass CNAME name.$synth2");
+	my $rr = new Net::DNS::RR("$qname $ttl $qclass CNAME name.$synth2");
 	push @ans, $rr;
-        $rr = new Net::DNS::RR("name.$synth2 $ttl $qclass CNAME name");
+	$rr = new Net::DNS::RR("name.$synth2 $ttl $qclass CNAME name");
 	push @ans, $rr;
-        $rr = new Net::DNS::RR("$synth2 $ttl $qclass DNAME .");
+	$rr = new Net::DNS::RR("$synth2 $ttl $qclass DNAME .");
 	push @ans, $rr;
 	$rcode = "NOERROR";
     } elsif ($qname eq "$synth" || $qname eq "$synth2") {
@@ -110,6 +115,30 @@ sub reply_handler {
 		push @ans, $rr;
 	}
 	$rcode = "NOERROR";
+    # The next few branches produce a zone with an illegal NS below a DNAME.
+    } elsif ($qname eq "jeff.dname") {
+	if ($qtype eq "SOA") {
+	    my $rr = new Net::DNS::RR("$qname $ttl $qclass SOA . . 0 0 0 0 0");
+	    push @ans, $rr;
+	} elsif ($qtype eq "NS") {
+	    my $rr = new Net::DNS::RR("$qname $ttl $qclass NS ns.jeff.dname.");
+	    push @ans, $rr;
+	    $rr = new Net::DNS::RR("$nsname $ttl $qclass A $localaddr");
+	    push @add, $rr;
+	} elsif ($qtype eq "DNAME") {
+	    my $rr = new Net::DNS::RR("$qname $ttl $qclass DNAME mutt.example.");
+	    push @ans, $rr;
+	}
+	$rcode = "NOERROR";
+    } elsif ($qname eq "ns.jeff.dname") {
+	if ($qtype eq "A") {
+		my $rr = new Net::DNS::RR("$qname $ttl $qclass A 10.53.0.3");
+		push @ans, $rr;
+	} elsif ($qtype eq "AAAA") {
+		my $rr = new Net::DNS::RR("jeff.dname. $ttl $qclass SOA . . 0 0 0 0 $ttl");
+		push @auth, $rr;
+	}
+	$rcode = "NOERROR";
     } else {
 	$rcode = "REFUSED";
     }
@@ -128,4 +157,11 @@ my $ns = Net::DNS::Nameserver->new(
     Verbose => $verbose,
 );
 
-$ns->main_loop;
+if ($Net::DNS::VERSION >= 1.42) {
+    $ns->start_server();
+    select(undef, undef, undef, undef);
+    $ns->stop_server();
+    unlink "ans.pid";
+} else {
+    $ns->main_loop;
+}

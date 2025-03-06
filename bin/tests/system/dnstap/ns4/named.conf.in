@@ -32,6 +32,8 @@ options {
 	qname-minimization disabled;
 };
 
+trust-anchors { };
+
 server 10.53.0.1 { tcp-only yes; };
 
 key rndc_key {
@@ -45,5 +47,5 @@ controls {
 
 zone "." {
 	type hint;
-	file "../../common/root.hint";
+	file "../../_common/root.hint";
 };

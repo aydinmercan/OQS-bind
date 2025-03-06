@@ -26,6 +26,7 @@ options {
 	querylog yes;
 	resolver-query-timeout 30000; # 30 seconds
 	dnssec-validation no;
+	disable-empty-zone 10.in-addr.arpa;
 };
 
 key rndc_key {
@@ -39,7 +40,7 @@ controls {
 
 zone "." {
 	type hint;
-	file "../../common/root.hint";
+	file "../../_common/root.hint";
 };
 
 zone "fwd." IN {

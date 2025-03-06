@@ -15,20 +15,25 @@
 . ../../conf.sh
 
 $CHECKZONE -D -F raw -o example.db.raw example \
-        example.db > /dev/null 2>&1
+  example.db >/dev/null 2>&1
 $CHECKZONE -D -F raw -o ../ns3/example.db.raw example \
-        example.db > /dev/null 2>&1
+  example.db >/dev/null 2>&1
 $CHECKZONE -D -F raw -o ../ns3/dynamic.db.raw dynamic \
-        example.db > /dev/null 2>&1
+  example.db >/dev/null 2>&1
 $CHECKZONE -D -F raw=1 -o example.db.raw1 example-explicit \
-        example.db > /dev/null 2>&1
+  example.db >/dev/null 2>&1
 $CHECKZONE -D -F raw=0 -o example.db.compat example-compat \
-        example.db > /dev/null 2>&1
+  example.db >/dev/null 2>&1
 $CHECKZONE -D -F raw -L 3333 -o example.db.serial.raw example \
-        example.db > /dev/null 2>&1
-$CHECKZONE -D -F raw -o large.db.raw large large.db > /dev/null 2>&1
+  example.db >/dev/null 2>&1
+$CHECKZONE -D -F raw -o under-limit.db.raw under-limit under-limit.db >/dev/null 2>&1
+$CHECKZONE -D -F raw -o under-limit-kasp.db.raw under-limit-kasp under-limit-kasp.db >/dev/null 2>&1
+$CHECKZONE -D -F raw -o below-limit.db.raw below-limit below-limit.db >/dev/null 2>&1
+$CHECKZONE -D -F raw -o below-limit-kasp.db.raw below-limit-kasp below-limit-kasp.db >/dev/null 2>&1
+$CHECKZONE -D -F raw -o above-limit.db.raw above-limit above-limit.db >/dev/null 2>&1
+$CHECKZONE -D -F raw -o 255types.db.raw 255types 255types.db >/dev/null 2>&1
 
-$KEYGEN -q -a "$DEFAULT_ALGORITHM" -b "$DEFAULT_BITS" -f KSK signed > /dev/null 2>&1
-$KEYGEN -q -a "$DEFAULT_ALGORITHM" -b "$DEFAULT_BITS" signed > /dev/null 2>&1
-$SIGNER -S -f signed.db.signed -o signed signed.db > /dev/null
-$CHECKZONE -D -F raw -o signed.db.raw signed signed.db.signed > /dev/null 2>&1
+$KEYGEN -q -a "$DEFAULT_ALGORITHM" -b "$DEFAULT_BITS" -f KSK signed >/dev/null 2>&1
+$KEYGEN -q -a "$DEFAULT_ALGORITHM" -b "$DEFAULT_BITS" signed >/dev/null 2>&1
+$SIGNER -S -f signed.db.signed -o signed signed.db >/dev/null
+$CHECKZONE -D -F raw -o signed.db.raw signed signed.db.signed >/dev/null 2>&1

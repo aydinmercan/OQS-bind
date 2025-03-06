@@ -19,6 +19,7 @@
 #include <isc/buffer.h>
 #include <isc/condition.h>
 #include <isc/errno.h>
+#include <isc/log.h>
 #include <isc/magic.h>
 #include <isc/mem.h>
 #include <isc/netmgr.h>
@@ -27,6 +28,7 @@
 #include <isc/region.h>
 #include <isc/result.h>
 #include <isc/sockaddr.h>
+#include <isc/stdtime.h>
 #include <isc/thread.h>
 #include <isc/util.h>
 #include <isc/uv.h>
@@ -74,11 +76,10 @@ isc__nm_udp_lb_socket(isc_nm_t *mgr, sa_family_t sa_family) {
 	result = isc__nm_socket(sa_family, SOCK_DGRAM, 0, &sock);
 	RUNTIME_CHECK(result == ISC_R_SUCCESS);
 
-	(void)isc__nm_socket_incoming_cpu(sock);
 	(void)isc__nm_socket_disable_pmtud(sock, sa_family);
 	(void)isc__nm_socket_v6only(sock, sa_family);
 
-	result = isc__nm_socket_reuse(sock);
+	result = isc__nm_socket_reuse(sock, 1);
 	RUNTIME_CHECK(result == ISC_R_SUCCESS);
 
 	if (mgr->load_balance_sockets) {
@@ -86,7 +87,7 @@ isc__nm_udp_lb_socket(isc_nm_t *mgr, sa_family_t sa_family) {
 		RUNTIME_CHECK(result == ISC_R_SUCCESS);
 	}
 
-	return (sock);
+	return sock;
 }
 
 /*
@@ -211,13 +212,15 @@ isc_nm_listenudp(isc_nm_t *mgr, uint32_t workers, isc_sockaddr_t *iface,
 	isc_result_t result = ISC_R_UNSET;
 	isc_nmsocket_t *sock = NULL;
 	uv_os_sock_t fd = -1;
-	isc__networker_t *worker = &mgr->workers[0];
+	isc__networker_t *worker = NULL;
 
 	REQUIRE(VALID_NM(mgr));
 	REQUIRE(isc_tid() == 0);
 
+	worker = &mgr->workers[0];
+
 	if (isc__nm_closing(worker)) {
-		return (ISC_R_SHUTTINGDOWN);
+		return ISC_R_SHUTTINGDOWN;
 	}
 
 	if (workers == 0) {
@@ -225,7 +228,7 @@ isc_nm_listenudp(isc_nm_t *mgr, uint32_t workers, isc_sockaddr_t *iface,
 	}
 	REQUIRE(workers <= mgr->nloops);
 
-	sock = isc_mem_get(worker->mctx, sizeof(isc_nmsocket_t));
+	sock = isc_mempool_get(worker->nmsocket_pool);
 	isc__nmsocket_init(sock, worker, isc_nm_udplistener, iface, NULL);
 
 	sock->nchildren = (workers == ISC_NM_LISTEN_ALL) ? (uint32_t)mgr->nloops
@@ -273,13 +276,13 @@ isc_nm_listenudp(isc_nm_t *mgr, uint32_t workers, isc_sockaddr_t *iface,
 		isc__nm_udp_stoplistening(sock);
 		isc_nmsocket_close(&sock);
 
-		return (result);
+		return result;
 	}
 
 	sock->active = true;
 
 	*sockp = sock;
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 #ifdef USE_ROUTE_SOCKET
@@ -295,7 +298,7 @@ route_socket(uv_os_sock_t *fdp) {
 	result = isc__nm_socket(ROUTE_SOCKET_PF, SOCK_RAW,
 				ROUTE_SOCKET_PROTOCOL, &fd);
 	if (result != ISC_R_SUCCESS) {
-		return (result);
+		return result;
 	}
 
 #ifdef USE_NETLINK
@@ -304,12 +307,12 @@ route_socket(uv_os_sock_t *fdp) {
 	r = bind(fd, (struct sockaddr *)&sa, sizeof(sa));
 	if (r < 0) {
 		isc__nm_closesocket(fd);
-		return (isc_errno_toresult(r));
+		return isc_errno_toresult(r);
 	}
 #endif
 
 	*fdp = fd;
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static isc_result_t
@@ -332,12 +335,12 @@ route_connect_direct(isc_nmsocket_t *sock) {
 	uv_handle_set_data((uv_handle_t *)&sock->read_timer, sock);
 
 	if (isc__nm_closing(worker)) {
-		return (ISC_R_SHUTTINGDOWN);
+		return ISC_R_SHUTTINGDOWN;
 	}
 
 	r = uv_udp_open(&sock->uv_handle.udp, sock->fd);
 	if (r != 0) {
-		return (isc_uverr2result(r));
+		return isc_uverr2result(r);
 	}
 
 	isc__nm_set_network_buffers(sock->worker->netmgr,
@@ -346,7 +349,7 @@ route_connect_direct(isc_nmsocket_t *sock) {
 	sock->connecting = false;
 	sock->connected = true;
 
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 #endif /* USE_ROUTE_SOCKET */
@@ -357,22 +360,24 @@ isc_nm_routeconnect(isc_nm_t *mgr, isc_nm_cb_t cb, void *cbarg) {
 	isc_result_t result = ISC_R_SUCCESS;
 	isc_nmsocket_t *sock = NULL;
 	isc__nm_uvreq_t *req = NULL;
-	isc__networker_t *worker = &mgr->workers[isc_tid()];
+	isc__networker_t *worker = NULL;
 	uv_os_sock_t fd = -1;
 
 	REQUIRE(VALID_NM(mgr));
 	REQUIRE(isc_tid() == 0);
 
+	worker = &mgr->workers[isc_tid()];
+
 	if (isc__nm_closing(worker)) {
-		return (ISC_R_SHUTTINGDOWN);
+		return ISC_R_SHUTTINGDOWN;
 	}
 
 	result = route_socket(&fd);
 	if (result != ISC_R_SUCCESS) {
-		return (result);
+		return result;
 	}
 
-	sock = isc_mem_get(worker->mctx, sizeof(*sock));
+	sock = isc_mempool_get(worker->nmsocket_pool);
 	isc__nmsocket_init(sock, worker, isc_nm_udpsocket, NULL, NULL);
 
 	sock->connect_cb = cb;
@@ -398,13 +403,13 @@ isc_nm_routeconnect(isc_nm_t *mgr, isc_nm_cb_t cb, void *cbarg) {
 
 	isc__nmsocket_detach(&sock);
 
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 #else  /* USE_ROUTE_SOCKET */
 	UNUSED(mgr);
 	UNUSED(cb);
 	UNUSED(cbarg);
 	UNUSED(extrahandlesize);
-	return (ISC_R_NOTIMPLEMENTED);
+	return ISC_R_NOTIMPLEMENTED;
 #endif /* USE_ROUTE_SOCKET */
 }
 
@@ -502,7 +507,7 @@ isc__nm_udp_read_cb(uv_udp_t *handle, ssize_t nrecv, const uv_buf_t *buf,
 	 *   bigger than 'maxudp' bytes for testing purposes.
 	 */
 	maxudp = atomic_load_relaxed(&sock->worker->netmgr->maxudp);
-	if ((maxudp != 0 && (uint32_t)nrecv > maxudp)) {
+	if (maxudp != 0 && (uint32_t)nrecv > maxudp) {
 		/*
 		 * We need to keep the read_cb intact in case, so the
 		 * readtimeout_cb can trigger and not crash because of
@@ -637,6 +642,19 @@ udp_send_cb(uv_udp_send_t *req, int status) {
 	isc__nm_sendcb(sock, uvreq, result, false);
 }
 
+static _Atomic(isc_stdtime_t) last_udpsends_log = 0;
+
+static bool
+can_log_udp_sends(void) {
+	isc_stdtime_t now = isc_stdtime_now();
+	isc_stdtime_t last = atomic_exchange_relaxed(&last_udpsends_log, now);
+	if (now != last) {
+		return true;
+	}
+
+	return false;
+}
+
 /*
  * Send the data in 'region' to a peer via a UDP socket. We try to find
  * a proper sibling/child socket so that we won't have to jump to
@@ -647,7 +665,7 @@ isc__nm_udp_send(isc_nmhandle_t *handle, const isc_region_t *region,
 		 isc_nm_cb_t cb, void *cbarg) {
 	isc_nmsocket_t *sock = handle->sock;
 	const isc_sockaddr_t *peer = &handle->peer;
-	const struct sockaddr *sa = sock->connected ? NULL : &peer->type.sa;
+	const struct sockaddr *sa = NULL;
 	isc__nm_uvreq_t *uvreq = NULL;
 	isc__networker_t *worker = NULL;
 	uint32_t maxudp;
@@ -660,6 +678,7 @@ isc__nm_udp_send(isc_nmhandle_t *handle, const isc_region_t *region,
 
 	worker = sock->worker;
 	maxudp = atomic_load(&worker->netmgr->maxudp);
+	sa = sock->connected ? NULL : &peer->type.sa;
 
 	/*
 	 * We're simulating a firewall blocking UDP packets bigger than
@@ -693,12 +712,39 @@ isc__nm_udp_send(isc_nmhandle_t *handle, const isc_region_t *region,
 		goto fail;
 	}
 
-	r = uv_udp_send(&uvreq->uv_req.udp_send, &sock->uv_handle.udp,
-			&uvreq->uvbuf, 1, sa, udp_send_cb);
-	if (r < 0) {
-		isc__nm_incstats(sock, STATID_SENDFAIL);
-		result = isc_uverr2result(r);
-		goto fail;
+	if (uv_udp_get_send_queue_size(&sock->uv_handle.udp) >
+	    ISC_NETMGR_UDP_SENDBUF_SIZE)
+	{
+		/*
+		 * The kernel UDP send queue is full, try sending the UDP
+		 * response synchronously instead of just failing.
+		 */
+		r = uv_udp_try_send(&sock->uv_handle.udp, &uvreq->uvbuf, 1, sa);
+		if (r < 0) {
+			if (can_log_udp_sends()) {
+				isc__netmgr_log(
+					worker->netmgr, ISC_LOG_ERROR,
+					"Sending UDP messages failed: %s",
+					isc_result_totext(isc_uverr2result(r)));
+			}
+
+			isc__nm_incstats(sock, STATID_SENDFAIL);
+			result = isc_uverr2result(r);
+			goto fail;
+		}
+
+		RUNTIME_CHECK(r == (int)region->length);
+		isc__nm_sendcb(sock, uvreq, ISC_R_SUCCESS, true);
+
+	} else {
+		/* Send the message asynchronously */
+		r = uv_udp_send(&uvreq->uv_req.udp_send, &sock->uv_handle.udp,
+				&uvreq->uvbuf, 1, sa, udp_send_cb);
+		if (r < 0) {
+			isc__nm_incstats(sock, STATID_SENDFAIL);
+			result = isc_uverr2result(r);
+			goto fail;
+		}
 	}
 	return;
 fail:
@@ -707,9 +753,10 @@ fail:
 
 static isc_result_t
 udp_connect_direct(isc_nmsocket_t *sock, isc__nm_uvreq_t *req) {
-	int uv_bind_flags = UV_UDP_REUSEADDR;
+	int uv_bind_flags = 0;
 	int r;
 	isc__networker_t *worker = sock->worker;
+	isc_result_t result;
 
 	r = uv_udp_init(&worker->loop->loop, &sock->uv_handle.udp);
 	UV_RUNTIME_CHECK(uv_udp_init, r);
@@ -722,9 +769,15 @@ udp_connect_direct(isc_nmsocket_t *sock, isc__nm_uvreq_t *req) {
 	r = uv_udp_open(&sock->uv_handle.udp, sock->fd);
 	if (r != 0) {
 		isc__nm_incstats(sock, STATID_OPENFAIL);
-		return (isc_uverr2result(r));
+		return isc_uverr2result(r);
 	}
 	isc__nm_incstats(sock, STATID_OPEN);
+
+	/*
+	 * uv_udp_open() enables REUSE_ADDR, we need to disable it again.
+	 */
+	result = isc__nm_socket_reuse(sock->fd, 0);
+	RUNTIME_CHECK(result == ISC_R_SUCCESS);
 
 	if (sock->iface.type.sa.sa_family == AF_INET6) {
 		uv_bind_flags |= UV_UDP_IPV6ONLY;
@@ -738,7 +791,7 @@ udp_connect_direct(isc_nmsocket_t *sock, isc__nm_uvreq_t *req) {
 			uv_bind_flags);
 	if (r != 0) {
 		isc__nm_incstats(sock, STATID_BINDFAIL);
-		return (isc_uverr2result(r));
+		return isc_uverr2result(r);
 	}
 
 	isc__nm_set_network_buffers(sock->worker->netmgr,
@@ -754,11 +807,11 @@ udp_connect_direct(isc_nmsocket_t *sock, isc__nm_uvreq_t *req) {
 	} while (r == UV_EADDRINUSE && --req->connect_tries > 0);
 	if (r != 0) {
 		isc__nm_incstats(sock, STATID_CONNECTFAIL);
-		return (isc_uverr2result(r));
+		return isc_uverr2result(r);
 	}
 	isc__nm_incstats(sock, STATID_CONNECT);
 
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 void
@@ -768,12 +821,14 @@ isc_nm_udpconnect(isc_nm_t *mgr, isc_sockaddr_t *local, isc_sockaddr_t *peer,
 	isc_nmsocket_t *sock = NULL;
 	isc__nm_uvreq_t *req = NULL;
 	sa_family_t sa_family;
-	isc__networker_t *worker = &mgr->workers[isc_tid()];
+	isc__networker_t *worker = NULL;
 	uv_os_sock_t fd = -1;
 
 	REQUIRE(VALID_NM(mgr));
 	REQUIRE(local != NULL);
 	REQUIRE(peer != NULL);
+
+	worker = &mgr->workers[isc_tid()];
 
 	if (isc__nm_closing(worker)) {
 		cb(NULL, ISC_R_SHUTTINGDOWN, cbarg);
@@ -789,8 +844,7 @@ isc_nm_udpconnect(isc_nm_t *mgr, isc_sockaddr_t *local, isc_sockaddr_t *peer,
 	}
 
 	/* Initialize the new socket */
-	/* FIXME: Use per-worker mempool for new sockets */
-	sock = isc_mem_get(worker->mctx, sizeof(isc_nmsocket_t));
+	sock = isc_mempool_get(worker->nmsocket_pool);
 	isc__nmsocket_init(sock, worker, isc_nm_udpsocket, local, NULL);
 
 	sock->connect_cb = cb;
@@ -800,11 +854,6 @@ isc_nm_udpconnect(isc_nm_t *mgr, isc_sockaddr_t *local, isc_sockaddr_t *peer,
 	sock->client = true;
 
 	sock->fd = fd;
-	result = isc__nm_socket_reuse(sock->fd);
-	RUNTIME_CHECK(result == ISC_R_SUCCESS ||
-		      result == ISC_R_NOTIMPLEMENTED);
-
-	(void)isc__nm_socket_incoming_cpu(sock->fd);
 
 	(void)isc__nm_socket_disable_pmtud(sock->fd, sa_family);
 

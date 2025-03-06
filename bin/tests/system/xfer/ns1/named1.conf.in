@@ -11,7 +11,7 @@
  * information regarding copyright ownership.
  */
 
-include "../../common/rndc.key";
+include "../../_common/rndc.key";
 
 controls {
 	inet 10.53.0.1 port @CONTROLPORT@ allow { any; } keys { rndc_key; };
@@ -25,6 +25,7 @@ options {
 	pid-file "named.pid";
 	listen-on { 10.53.0.1; };
 	listen-on-v6 { none; };
+	allow-transfer { any; };
 	recursion no;
 	dnssec-validation no;
 	notify yes;
@@ -46,6 +47,11 @@ zone "edns-expire" {
 	file "edns-expire.db";
 };
 
+zone "axfr-min-transfer-rate" {
+	type primary;
+	file "axfr-min-transfer-rate.db";
+};
+
 zone "axfr-max-transfer-time" {
 	type primary;
 	file "axfr-max-transfer-time.db";
@@ -54,6 +60,16 @@ zone "axfr-max-transfer-time" {
 zone "axfr-max-idle-time" {
 	type primary;
 	file "axfr-max-idle-time.db";
+};
+
+zone "axfr-rndc-retransfer-force" {
+	type primary;
+	file "axfr-rndc-retransfer-force.db";
+};
+
+zone "xot-primary-try-next" {
+	type primary;
+	file "xot-primary-try-next.db";
 };
 
 zone "axfr-too-big" {

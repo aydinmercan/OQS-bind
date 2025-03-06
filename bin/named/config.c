@@ -67,7 +67,6 @@ options {\n\
 	interface-interval 60;\n\
 	listen-on {any;};\n\
 	listen-on-v6 {any;};\n\
-#	lock-file \"" NAMED_LOCALSTATEDIR "/run/named/named.lock\";\n\
 	match-mapped-addresses no;\n\
 	max-ixfr-ratio 100%;\n\
 	max-rsa-exponent-size 0; /* no limit */\n\
@@ -97,10 +96,12 @@ options {\n\
 #endif
 			    "\
 	prefetch 2 9;\n\
+#	querylog <boolean>;\n\
 	recursing-file \"named.recursing\";\n\
 	recursive-clients 1000;\n\
 	request-nsid false;\n\
 	resolver-query-timeout 10;\n\
+#	responselog <boolean>;\n\
 	rrset-order { order random; };\n\
 	secroots-file \"named.secroots\";\n\
 	send-cookie true;\n\
@@ -110,6 +111,9 @@ options {\n\
 #	session-keyfile \"" NAMED_LOCALSTATEDIR "/run/named/session.key\";\n\
 	session-keyname local-ddns;\n\
 	startup-notify-rate 20;\n\
+	sig0checks-quota 1;\n\
+	sig0key-checks-limit 16;\n\
+	sig0message-checks-limit 2;\n\
 	statistics-file \"named.stats\";\n\
 	tcp-advertised-timeout 300;\n\
 	tcp-clients 150;\n\
@@ -133,6 +137,8 @@ options {\n\
 	/* view */\n\
 	allow-new-zones no;\n\
 	allow-notify {none;};\n\
+	allow-proxy {none;};\n\
+	allow-proxy-on {any;};\n\
 	allow-query-cache { localnets; localhost; };\n\
 	allow-query-cache-on { any; };\n\
 	allow-recursion { localnets; localhost; };\n\
@@ -168,7 +174,9 @@ options {\n\
 	max-clients-per-query 100;\n\
 	max-ncache-ttl 10800; /* 3 hours */\n\
 	max-recursion-depth 7;\n\
-	max-recursion-queries 100;\n\
+	max-recursion-queries 50;\n\
+	max-query-count 200;\n\
+	max-query-restarts 11;\n\
 	max-stale-ttl 86400; /* 1 day */\n\
 	message-compression yes;\n\
 	min-ncache-ttl 0; /* 0 hours */\n\
@@ -188,8 +196,6 @@ options {\n\
 	request-expire true;\n\
 	request-ixfr true;\n\
 	require-server-cookie no;\n\
-	resolver-nonbackoff-tries 3;\n\
-	resolver-retry-interval 800; /* in milliseconds */\n\
 	root-key-sentinel yes;\n\
 	servfail-ttl 1;\n\
 #	sortlist <none>\n\
@@ -201,13 +207,14 @@ options {\n\
 	synth-from-dnssec yes;\n\
 #	topology <none>\n\
 	transfer-format many-answers;\n\
+	resolver-use-dns64 false;\n\
 	v6-bias 50;\n\
 	zero-no-soa-ttl-cache no;\n\
 \n\
 	/* zone */\n\
 	allow-query {any;};\n\
 	allow-query-on {any;};\n\
-	allow-transfer {any;};\n\
+	allow-transfer {none;};\n\
 #	also-notify <none>\n\
 	check-integrity yes;\n\
 	check-mx-cname warn;\n\
@@ -222,14 +229,17 @@ options {\n\
 	ixfr-from-differences false;\n\
 	max-journal-size default;\n\
 	max-records 0;\n\
+	max-records-per-type 100;\n\
 	max-refresh-time 2419200; /* 4 weeks */\n\
 	max-retry-time 1209600; /* 2 weeks */\n\
+	max-types-per-name 100;\n\
 	max-transfer-idle-in 60;\n\
 	max-transfer-idle-out 60;\n\
 	max-transfer-time-in 120;\n\
 	max-transfer-time-out 120;\n\
 	min-refresh-time 300;\n\
 	min-retry-time 500;\n\
+	min-transfer-rate-in 10240 5;\n\
 	multi-master no;\n\
 	notify yes;\n\
 	notify-delay 5;\n\
@@ -295,9 +305,11 @@ dnssec-policy \"default\" {\n\
 	cds-digest-types { 2; };\n\
 	dnskey-ttl " DNS_KASP_KEY_TTL ";\n\
 	inline-signing yes;\n\
+	offline-ksk no;\n\
 	publish-safety " DNS_KASP_PUBLISH_SAFETY "; \n\
 	retire-safety " DNS_KASP_RETIRE_SAFETY "; \n\
 	purge-keys " DNS_KASP_PURGE_KEYS "; \n\
+	signatures-jitter " DNS_KASP_SIG_JITTER "; \n\
 	signatures-refresh " DNS_KASP_SIG_REFRESH "; \n\
 	signatures-validity " DNS_KASP_SIG_VALIDITY "; \n\
 	signatures-validity-dnskey " DNS_KASP_SIG_VALIDITY_DNSKEY "; \n\
@@ -326,15 +338,15 @@ dnssec-policy \"insecure\" {\n\
 
 			    "# END TRUST ANCHORS\n\
 \n\
-primaries " DEFAULT_IANA_ROOT_ZONE_PRIMARIES " {\n\
-	2001:500:200::b;	# b.root-servers.net\n\
+remote-servers " DEFAULT_IANA_ROOT_ZONE_PRIMARIES " {\n\
+	2801:1b8:10::b;		# b.root-servers.net\n\
 	2001:500:2::c;		# c.root-servers.net\n\
 	2001:500:2f::f;		# f.root-servers.net\n\
 	2001:500:12::d0d;	# g.root-servers.net\n\
 	2001:7fd::1;		# k.root-servers.net\n\
 	2620:0:2830:202::132;	# xfr.cjr.dns.icann.org\n\
 	2620:0:2d0:202::132;	# xfr.lax.dns.icann.org\n\
-	199.9.14.201;		# b.root-servers.net\n\
+	170.247.170.2;		# b.root-servers.net\n\
 	192.33.4.12;		# c.root-servers.net\n\
 	192.5.5.241;		# f.root-servers.net\n\
 	192.112.36.4;		# g.root-servers.net\n\
@@ -350,13 +362,15 @@ named_config_parsedefaults(cfg_parser_t *parser, cfg_obj_t **conf) {
 
 	isc_buffer_init(&b, defaultconf, sizeof(defaultconf) - 1);
 	isc_buffer_add(&b, sizeof(defaultconf) - 1);
-	return (cfg_parse_buffer(parser, &b, __FILE__, 0, &cfg_type_namedconf,
-				 CFG_PCTX_NODEPRECATED, conf));
+	return cfg_parse_buffer(parser, &b, __FILE__, 0, &cfg_type_namedconf,
+				CFG_PCTX_NODEPRECATED | CFG_PCTX_NOOBSOLETE |
+					CFG_PCTX_NOEXPERIMENTAL,
+				conf);
 }
 
 const char *
 named_config_getdefault(void) {
-	return (defaultconf);
+	return defaultconf;
 }
 
 isc_result_t
@@ -366,10 +380,10 @@ named_config_get(cfg_obj_t const *const *maps, const char *name,
 
 	for (i = 0; maps[i] != NULL; i++) {
 		if (cfg_map_get(maps[i], name, obj) == ISC_R_SUCCESS) {
-			return (ISC_R_SUCCESS);
+			return ISC_R_SUCCESS;
 		}
 	}
-	return (ISC_R_NOTFOUND);
+	return ISC_R_NOTFOUND;
 }
 
 isc_result_t
@@ -395,7 +409,7 @@ named_checknames_get(const cfg_obj_t **maps, const char *const names[],
 			 */
 			if (checknames != NULL && !cfg_obj_islist(checknames)) {
 				*obj = checknames;
-				return (ISC_R_SUCCESS);
+				return ISC_R_SUCCESS;
 			}
 			for (element = cfg_list_first(checknames);
 			     element != NULL; element = cfg_list_next(element))
@@ -409,13 +423,13 @@ named_checknames_get(const cfg_obj_t **maps, const char *const names[],
 					{
 						*obj = cfg_tuple_get(value,
 								     "mode");
-						return (ISC_R_SUCCESS);
+						return ISC_R_SUCCESS;
 					}
 				}
 			}
 		}
 	}
-	return (ISC_R_NOTFOUND);
+	return ISC_R_NOTFOUND;
 }
 
 int
@@ -427,7 +441,7 @@ named_config_listcount(const cfg_obj_t *list) {
 		i++;
 	}
 
-	return (i);
+	return i;
 }
 
 isc_result_t
@@ -438,7 +452,7 @@ named_config_getclass(const cfg_obj_t *classobj, dns_rdataclass_t defclass,
 
 	if (!cfg_obj_isstring(classobj)) {
 		*classp = defclass;
-		return (ISC_R_SUCCESS);
+		return ISC_R_SUCCESS;
 	}
 	r.base = UNCONST(cfg_obj_asstring(classobj));
 	r.length = strlen(r.base);
@@ -447,7 +461,7 @@ named_config_getclass(const cfg_obj_t *classobj, dns_rdataclass_t defclass,
 		cfg_obj_log(classobj, named_g_lctx, ISC_LOG_ERROR,
 			    "unknown class '%s'", r.base);
 	}
-	return (result);
+	return result;
 }
 
 isc_result_t
@@ -458,7 +472,7 @@ named_config_gettype(const cfg_obj_t *typeobj, dns_rdatatype_t deftype,
 
 	if (!cfg_obj_isstring(typeobj)) {
 		*typep = deftype;
-		return (ISC_R_SUCCESS);
+		return ISC_R_SUCCESS;
 	}
 	r.base = UNCONST(cfg_obj_asstring(typeobj));
 	r.length = strlen(r.base);
@@ -467,7 +481,7 @@ named_config_gettype(const cfg_obj_t *typeobj, dns_rdatatype_t deftype,
 		cfg_obj_log(typeobj, named_g_lctx, ISC_LOG_ERROR,
 			    "unknown type '%s'", r.base);
 	}
-	return (result);
+	return result;
 }
 
 dns_zonetype_t
@@ -493,12 +507,12 @@ named_config_getzonetype(const cfg_obj_t *zonetypeobj) {
 	} else {
 		UNREACHABLE();
 	}
-	return (ztype);
+	return ztype;
 }
 
-static isc_result_t
-getremotesdef(const cfg_obj_t *cctx, const char *list, const char *name,
-	      const cfg_obj_t **ret) {
+isc_result_t
+named_config_getremotesdef(const cfg_obj_t *cctx, const char *list,
+			   const char *name, const cfg_obj_t **ret) {
 	isc_result_t result;
 	const cfg_obj_t *obj = NULL;
 	const cfg_listelt_t *elt;
@@ -509,7 +523,7 @@ getremotesdef(const cfg_obj_t *cctx, const char *list, const char *name,
 
 	result = cfg_map_get(cctx, list, &obj);
 	if (result != ISC_R_SUCCESS) {
-		return (result);
+		return result;
 	}
 	elt = cfg_list_first(obj);
 	while (elt != NULL) {
@@ -518,28 +532,11 @@ getremotesdef(const cfg_obj_t *cctx, const char *list, const char *name,
 			       name) == 0)
 		{
 			*ret = obj;
-			return (ISC_R_SUCCESS);
+			return ISC_R_SUCCESS;
 		}
 		elt = cfg_list_next(elt);
 	}
-	return (ISC_R_NOTFOUND);
-}
-
-isc_result_t
-named_config_getremotesdef(const cfg_obj_t *cctx, const char *list,
-			   const char *name, const cfg_obj_t **ret) {
-	isc_result_t result;
-
-	if (strcmp(list, "parental-agents") == 0) {
-		return (getremotesdef(cctx, list, name, ret));
-	} else if (strcmp(list, "primaries") == 0) {
-		result = getremotesdef(cctx, list, name, ret);
-		if (result != ISC_R_SUCCESS) {
-			result = getremotesdef(cctx, "masters", name, ret);
-		}
-		return (result);
-	}
-	return (ISC_R_NOTFOUND);
+	return ISC_R_NOTFOUND;
 }
 
 static isc_result_t
@@ -554,7 +551,7 @@ named_config_getname(isc_mem_t *mctx, const cfg_obj_t *obj,
 
 	if (!cfg_obj_isstring(obj)) {
 		*namep = NULL;
-		return (ISC_R_SUCCESS);
+		return ISC_R_SUCCESS;
 	}
 
 	*namep = isc_mem_get(mctx, sizeof(**namep));
@@ -569,11 +566,11 @@ named_config_getname(isc_mem_t *mctx, const cfg_obj_t *obj,
 	if (result != ISC_R_SUCCESS) {
 		isc_mem_put(mctx, *namep, sizeof(**namep));
 		*namep = NULL;
-		return (result);
+		return result;
 	}
 	dns_name_dup(dns_fixedname_name(&fname), mctx, *namep);
 
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 #define grow_array(mctx, array, newlen, oldlen)                          \
@@ -590,10 +587,12 @@ named_config_getname(isc_mem_t *mctx, const cfg_obj_t *obj,
 		oldlen = newlen;                                    \
 	}
 
+static const char *remotesnames[4] = { "remote-servers", "parental-agents",
+				       "primaries", "masters" };
+
 isc_result_t
-named_config_getipandkeylist(const cfg_obj_t *config, const char *listtype,
-			     const cfg_obj_t *list, isc_mem_t *mctx,
-			     dns_ipkeylist_t *ipkl) {
+named_config_getipandkeylist(const cfg_obj_t *config, const cfg_obj_t *list,
+			     isc_mem_t *mctx, dns_ipkeylist_t *ipkl) {
 	uint32_t addrcount = 0, srccount = 0;
 	uint32_t keycount = 0, tlscount = 0;
 	uint32_t listcount = 0, l = 0, i = 0;
@@ -676,8 +675,6 @@ newlist:
 		isc_sockaddr_any6(&src6);
 	}
 
-	result = ISC_R_NOMEMORY;
-
 	element = cfg_list_first(addrlist);
 resume:
 	for (; element != NULL; element = cfg_list_next(element)) {
@@ -708,17 +705,22 @@ resume:
 				continue;
 			}
 			list = NULL;
-			tresult = named_config_getremotesdef(config, listtype,
-							     listname, &list);
+			tresult = ISC_R_NOTFOUND;
+			for (size_t n = 0; n < ARRAY_SIZE(remotesnames); n++) {
+				tresult = named_config_getremotesdef(
+					config, remotesnames[n], listname,
+					&list);
+				if (tresult == ISC_R_SUCCESS) {
+					break;
+				}
+			}
 			if (tresult == ISC_R_NOTFOUND) {
 				cfg_obj_log(addr, named_g_lctx, ISC_LOG_ERROR,
-					    "%s \"%s\" not found", listtype,
+					    "remote-servers \"%s\" not found",
 					    listname);
-
-				result = tresult;
-				goto cleanup;
 			}
 			if (tresult != ISC_R_SUCCESS) {
+				result = tresult;
 				goto cleanup;
 			}
 			lists[l++].name = listname;
@@ -821,7 +823,7 @@ resume:
 	ipkl->count = addrcount;
 	ipkl->allocated = addrcount;
 
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 
 cleanup:
 	if (addrs != NULL) {
@@ -860,7 +862,7 @@ cleanup:
 	if (stack != NULL) {
 		isc_mem_cput(mctx, stack, stackcount, sizeof(stack[0]));
 	}
-	return (result);
+	return result;
 }
 
 isc_result_t
@@ -886,10 +888,10 @@ named_config_getport(const cfg_obj_t *config, const char *type,
 		cfg_obj_log(portobj, named_g_lctx, ISC_LOG_ERROR,
 			    "port '%u' out of range",
 			    cfg_obj_asuint32(portobj));
-		return (ISC_R_RANGE);
+		return ISC_R_RANGE;
 	}
 	*portp = (in_port_t)cfg_obj_asuint32(portobj);
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 struct keyalgorithms {
@@ -933,15 +935,15 @@ named_config_getkeyalgorithm(const char *str, unsigned int *typep,
 		}
 	}
 	if (algorithms[i].str == NULL) {
-		return (ISC_R_NOTFOUND);
+		return ISC_R_NOTFOUND;
 	}
 	if (str[len] == '-') {
 		result = isc_parse_uint16(&bits, str + len + 1, 10);
 		if (result != ISC_R_SUCCESS) {
-			return (result);
+			return result;
 		}
 		if (bits > algorithms[i].size) {
-			return (ISC_R_RANGE);
+			return ISC_R_RANGE;
 		}
 	} else if (algorithms[i].size == 0) {
 		bits = 128;
@@ -950,5 +952,5 @@ named_config_getkeyalgorithm(const char *str, unsigned int *typep,
 	}
 	SET_IF_NOT_NULL(typep, algorithms[i].type);
 	SET_IF_NOT_NULL(digestbits, bits);
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }

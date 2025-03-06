@@ -230,22 +230,13 @@ sub construct_ns_command {
 
 	my $command;
 
-	if ($ENV{'USE_VALGRIND'}) {
-		$command = "valgrind -q --gen-suppressions=all --num-callers=48 --fullpath-after= --log-file=named-$server-valgrind-%p.log ";
-
-		if ($ENV{'USE_VALGRIND'} eq 'helgrind') {
-			$command .= "--tool=helgrind ";
-		} else {
-			$command .= "--tool=memcheck --track-origins=yes --leak-check=full ";
-		}
-
-		$command .= "$NAMED -m none ";
+	if ($taskset) {
+		$command = "taskset $taskset $NAMED ";
+	} elsif ($ENV{'USE_RR'}) {
+		$ENV{'_RR_TRACE_DIR'} = ".";
+		$command = "$ENV{'TOP_BUILDDIR'}/libtool --mode=execute rr record --chaos $NAMED ";
 	} else {
-		if ($taskset) {
-			$command = "taskset $taskset $NAMED ";
-		} else {
-			$command = "$NAMED ";
-		}
+		$command = "$NAMED ";
 	}
 
 	my $args_file = $testdir . "/" . $server . "/" . "named.args";
@@ -269,7 +260,6 @@ sub construct_ns_command {
 		}
 	} else {
 		$command .= "-D $test-$server ";
-		$command .= "-X named.lock ";
 		$command .= "-m record ";
 
 		foreach my $t_option(
@@ -281,7 +271,7 @@ sub construct_ns_command {
 			}
 		}
 
-		$command .= "-c named.conf -d 99 -g -U 4 -T maxcachesize=2097152";
+		$command .= "-c named.conf -d 99 -g -T maxcachesize=2097152";
 	}
 
 	if (-e "$testdir/$server/named.notcp") {
@@ -333,6 +323,7 @@ sub construct_ans_command {
 	}
 
 	if (-e "$testdir/$server/ans.py") {
+		$ENV{'PYTHONPATH'} = $testdir . ":" . $ENV{'srcdir'};
 		$command = "$PYTHON -u ans.py 10.53.0.$n $queryport";
 	} elsif (-e "$testdir/$server/ans.pl") {
 		$command = "$PERL ans.pl";

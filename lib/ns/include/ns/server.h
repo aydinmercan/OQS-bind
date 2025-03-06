@@ -49,6 +49,7 @@
 #define NS_SERVER_TRANSFERINSECS 0x00008000U /*%< -T transferinsecs */
 #define NS_SERVER_TRANSFERSLOWLY 0x00010000U /*%< -T transferslowly */
 #define NS_SERVER_TRANSFERSTUCK	 0x00020000U /*%< -T transferstuck */
+#define NS_SERVER_LOGRESPONSES	 0x00040000U /*%< log responses */
 
 /*%
  * Type for callback function to get hostname.
@@ -66,7 +67,9 @@ typedef void (*ns_fuzzcb_t)(void);
  */
 typedef isc_result_t (*ns_matchview_t)(
 	isc_netaddr_t *srcaddr, isc_netaddr_t *destaddr, dns_message_t *message,
-	dns_aclenv_t *env, isc_result_t *sigresultp, dns_view_t **viewp);
+	dns_aclenv_t *env, ns_server_t *sctx, isc_loop_t *loop, isc_job_cb cb,
+	void *cbarg, isc_result_t *sigresultp, isc_result_t *viewmatchresult,
+	dns_view_t **viewp);
 
 /*%
  * Server context.
@@ -88,6 +91,8 @@ struct ns_server {
 	isc_quota_t tcpquota;
 	isc_quota_t xfroutquota;
 	isc_quota_t updquota;
+	isc_quota_t sig0checksquota;
+	dns_acl_t  *sig0checksquota_exempt;
 	ISC_LIST(isc_quota_t) http_quotas;
 	isc_mutex_t http_quotas_lock;
 
@@ -99,6 +104,7 @@ struct ns_server {
 	uint16_t       transfer_tcp_message_size;
 	bool	       interface_auto;
 	dns_tkeyctx_t *tkeyctx;
+	uint8_t	       max_restarts;
 
 	/*% Server id for NSID */
 	char *server_id;

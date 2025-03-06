@@ -132,6 +132,9 @@ command is one of the following:\n\
   halt		Stop the server without saving pending updates.\n\
   halt -p	Stop the server without saving pending updates reporting\n\
 		process id.\n\
+  skr -import file zone [class [view]]\n\
+		Import a SKR file for the specified zone, for offline KSK\n\
+		signing.\n\
   loadkeys zone [class [view]]\n\
 		Update keys without signing immediately.\n\
   managed-keys refresh [class [view]]\n\
@@ -140,6 +143,10 @@ command is one of the following:\n\
 		Display RFC 5011 managed keys information\n\
   managed-keys sync [class [view]]\n\
 		Write RFC 5011 managed keys to disk\n\
+  memprof [ on | off | dump ]\n\
+		Enable / disable memory profiling or dump the profile.\n\
+		Requires named to built with jemalloc and run with the relevant\n\
+		MALLOC_CONF environment variables.\n\
   modzone zone [class [view]] { zone-options }\n\
 		Modify a zone's configuration.\n\
 		Requires allow-new-zones option.\n\
@@ -260,18 +267,11 @@ get_addresses(const char *host, in_port_t port) {
 
 	REQUIRE(host != NULL);
 
-	if (*host == '/') {
-		result = isc_sockaddr_frompath(&serveraddrs[nserveraddrs],
-					       host);
-		if (result == ISC_R_SUCCESS) {
-			nserveraddrs++;
-		}
-	} else {
-		count = SERVERADDRS - nserveraddrs;
-		result = isc_getaddresses(
-			host, port, &serveraddrs[nserveraddrs], count, &found);
-		nserveraddrs += found;
-	}
+	count = SERVERADDRS - nserveraddrs;
+	result = isc_getaddresses(host, port, &serveraddrs[nserveraddrs], count,
+				  &found);
+	nserveraddrs += found;
+
 	if (result != ISC_R_SUCCESS) {
 		fatal("couldn't get address for '%s': %s", host,
 		      isc_result_totext(result));
@@ -312,8 +312,7 @@ rndc_recvdone(isc_nmhandle_t *handle, isc_result_t result, void *arg) {
 		fatal("recv failed: %s", isc_result_totext(result));
 	}
 
-	source.rstart = isc_buffer_base(ccmsg->buffer);
-	source.rend = isc_buffer_used(ccmsg->buffer);
+	isccc_ccmsg_toregion(ccmsg, &source);
 
 	DO("parse message",
 	   isccc_cc_fromwire(&source, &response, algorithm, &secret));
@@ -355,7 +354,7 @@ rndc_recvdone(isc_nmhandle_t *handle, isc_result_t result, void *arg) {
 
 	isccc_sexpr_free(&response);
 
-	isccc_ccmsg_invalidate(ccmsg);
+	isccc_ccmsg_disconnect(ccmsg);
 	isc_loopmgr_shutdown(loopmgr);
 }
 
@@ -388,8 +387,7 @@ rndc_recvnonce(isc_nmhandle_t *handle ISC_ATTR_UNUSED, isc_result_t result,
 		fatal("recv failed: %s", isc_result_totext(result));
 	}
 
-	source.rstart = isc_buffer_base(ccmsg->buffer);
-	source.rend = isc_buffer_used(ccmsg->buffer);
+	isccc_ccmsg_toregion(ccmsg, &source);
 
 	DO("parse message",
 	   isccc_cc_fromwire(&source, &response, algorithm, &secret));
@@ -518,11 +516,6 @@ rndc_startconnect(isc_sockaddr_t *addr) {
 	case AF_INET6:
 		local = &local6;
 		break;
-	case AF_UNIX:
-		/*
-		 * TODO: support UNIX domain sockets in netgmr.
-		 */
-		fatal("UNIX domain sockets not currently supported");
 	default:
 		UNREACHABLE();
 	}
@@ -944,7 +937,7 @@ main(int argc, char **argv) {
 		default:
 			fprintf(stderr, "%s: unhandled option -%c\n", program,
 				isc_commandline_option);
-			exit(1);
+			exit(EXIT_FAILURE);
 		}
 	}
 
@@ -1015,6 +1008,8 @@ main(int argc, char **argv) {
 
 	isc_loopmgr_run(loopmgr);
 
+	isccc_ccmsg_invalidate(&rndc_ccmsg);
+
 	isc_log_destroy(&log);
 	isc_log_setcontext(NULL);
 
@@ -1032,8 +1027,8 @@ main(int argc, char **argv) {
 	isc_managers_destroy(&rndc_mctx, &loopmgr, &netmgr);
 
 	if (failed) {
-		return (1);
+		return 1;
 	}
 
-	return (0);
+	return 0;
 }

@@ -73,7 +73,7 @@
 #define ERR_IS_MXCNAME	   6
 #define ERR_IS_SRVCNAME	   7
 
-static const char *dbtype[] = { "rbt" };
+static const char *dbtype[] = { ZONEDB_DEFAULT };
 
 int debug = 0;
 const char *journal = NULL;
@@ -88,6 +88,7 @@ bool dochecksrv = false;
 bool docheckns = false;
 #endif /* if CHECK_LOCAL */
 dns_zoneopt_t zone_options = DNS_ZONEOPT_CHECKNS | DNS_ZONEOPT_CHECKMX |
+			     DNS_ZONEOPT_CHECKDUPRR | DNS_ZONEOPT_CHECKSPF |
 			     DNS_ZONEOPT_MANYERRORS | DNS_ZONEOPT_CHECKNAMES |
 			     DNS_ZONEOPT_CHECKINTEGRITY |
 #if CHECK_SIBLING
@@ -145,14 +146,14 @@ logged(char *key, int value) {
 	isc_result_t result;
 
 	if (symtab == NULL) {
-		return (false);
+		return false;
 	}
 
 	result = isc_symtab_lookup(symtab, key, value, NULL);
 	if (result == ISC_R_SUCCESS) {
-		return (true);
+		return true;
 	}
-	return (false);
+	return false;
 }
 
 static bool
@@ -176,7 +177,7 @@ checkns(dns_zone_t *zone, const dns_name_t *name, const dns_name_t *owner,
 		aaaa->type == dns_rdatatype_aaaa);
 
 	if (a == NULL || aaaa == NULL) {
-		return (answer);
+		return answer;
 	}
 
 	memset(&hints, 0, sizeof(hints));
@@ -233,7 +234,7 @@ checkns(dns_zone_t *zone, const dns_name_t *name, const dns_name_t *owner,
 			add(namebuf, ERR_NO_ADDRESSES);
 		}
 		/* XXX950 make fatal for 9.5.0 */
-		return (true);
+		return true;
 
 	default:
 		if (!logged(namebuf, ERR_LOOKUP_FAILURE)) {
@@ -242,7 +243,7 @@ checkns(dns_zone_t *zone, const dns_name_t *name, const dns_name_t *owner,
 				     gai_strerror(result));
 			add(namebuf, ERR_LOOKUP_FAILURE);
 		}
-		return (true);
+		return true;
 	}
 
 	/*
@@ -370,7 +371,7 @@ checkmissing:
 		}
 	}
 	freeaddrinfo(ai);
-	return (answer);
+	return answer;
 }
 
 static bool
@@ -433,7 +434,7 @@ checkmx(dns_zone_t *zone, const dns_name_t *name, const dns_name_t *owner) {
 			}
 		}
 		freeaddrinfo(ai);
-		return (answer);
+		return answer;
 
 	case EAI_NONAME:
 #if defined(EAI_NODATA) && (EAI_NODATA != EAI_NONAME)
@@ -447,7 +448,7 @@ checkmx(dns_zone_t *zone, const dns_name_t *name, const dns_name_t *owner) {
 			add(namebuf, ERR_NO_ADDRESSES);
 		}
 		/* XXX950 make fatal for 9.5.0. */
-		return (true);
+		return true;
 
 	default:
 		if (!logged(namebuf, ERR_LOOKUP_FAILURE)) {
@@ -456,7 +457,7 @@ checkmx(dns_zone_t *zone, const dns_name_t *name, const dns_name_t *owner) {
 				     gai_strerror(result));
 			add(namebuf, ERR_LOOKUP_FAILURE);
 		}
-		return (true);
+		return true;
 	}
 }
 
@@ -520,7 +521,7 @@ checksrv(dns_zone_t *zone, const dns_name_t *name, const dns_name_t *owner) {
 			}
 		}
 		freeaddrinfo(ai);
-		return (answer);
+		return answer;
 
 	case EAI_NONAME:
 #if defined(EAI_NODATA) && (EAI_NODATA != EAI_NONAME)
@@ -534,7 +535,7 @@ checksrv(dns_zone_t *zone, const dns_name_t *name, const dns_name_t *owner) {
 			add(namebuf, ERR_NO_ADDRESSES);
 		}
 		/* XXX950 make fatal for 9.5.0. */
-		return (true);
+		return true;
 
 	default:
 		if (!logged(namebuf, ERR_LOOKUP_FAILURE)) {
@@ -543,7 +544,7 @@ checksrv(dns_zone_t *zone, const dns_name_t *name, const dns_name_t *owner) {
 				     gai_strerror(result));
 			add(namebuf, ERR_LOOKUP_FAILURE);
 		}
-		return (true);
+		return true;
 	}
 }
 
@@ -572,7 +573,7 @@ setup_logging(isc_mem_t *mctx, FILE *errout, isc_log_t **logp) {
 		      ISC_R_SUCCESS);
 
 	*logp = log;
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 /*% load the zone */
@@ -647,7 +648,7 @@ cleanup:
 	if (zone != NULL) {
 		dns_zone_detach(&zone);
 	}
-	return (result);
+	return result;
 }
 
 /*% dump the zone */
@@ -678,7 +679,7 @@ dump_zone(const char *zonename, dns_zone_t *zone, const char *filename,
 				"could not open output "
 				"file \"%s\" for writing\n",
 				filename);
-			return (ISC_R_FAILURE);
+			return ISC_R_FAILURE;
 		}
 	}
 
@@ -688,5 +689,5 @@ dump_zone(const char *zonename, dns_zone_t *zone, const char *filename,
 		(void)isc_stdio_close(output);
 	}
 
-	return (result);
+	return result;
 }

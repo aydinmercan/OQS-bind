@@ -24,6 +24,7 @@ options {
 	pid-file "named.pid";
 	listen-on { 10.53.0.3; };
 	listen-on-v6 { none; };
+	allow-transfer { any; };
 	recursion no;
 	notify yes;
 	dnssec-validation yes;
@@ -87,6 +88,7 @@ dnssec-policy "jitter" {
 	signatures-validity P10D;
 	signatures-validity-dnskey P10D;
 	signatures-refresh P2D;
+	signatures-jitter P8D;
 };
 
 # Jitter, NSEC3
@@ -122,7 +124,7 @@ dnssec-policy "rsasha512" {
 
 zone "." {
 	type hint;
-	file "../../common/root.hint";
+	file "../../_common/root.hint";
 };
 
 zone "example" {
@@ -261,6 +263,16 @@ zone "nsec3-to-nsec.example" {
 	file "nsec3-to-nsec.example.db";
 	allow-update { any; };
 	inline-signing no;
+	max-journal-size 10M;
+	dnssec-policy autosign;
+};
+
+zone "nsec3-to-nsec3.example" {
+	type primary;
+	file "nsec3-to-nsec3.example.db";
+	allow-update { any; };
+	inline-signing no;
+	max-journal-size 10M;
 	dnssec-policy nsec3;
 };
 

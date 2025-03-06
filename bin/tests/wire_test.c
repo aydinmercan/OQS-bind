@@ -41,18 +41,18 @@ CHECKRESULT(isc_result_t result, const char *msg) {
 	if (result != ISC_R_SUCCESS) {
 		printf("%s: %s\n", msg, isc_result_totext(result));
 
-		exit(1);
+		exit(EXIT_FAILURE);
 	}
 }
 
 static int
 fromhex(char c) {
 	if (c >= '0' && c <= '9') {
-		return (c - '0');
+		return c - '0';
 	} else if (c >= 'a' && c <= 'f') {
-		return (c - 'a' + 10);
+		return c - 'a' + 10;
 	} else if (c >= 'A' && c <= 'F') {
-		return (c - 'A' + 10);
+		return c - 'A' + 10;
 	}
 
 	fprintf(stderr, "bad input format: %02x\n", c);
@@ -62,7 +62,7 @@ fromhex(char c) {
 static void
 usage(void) {
 	fprintf(stderr, "wire_test [-b] [-d] [-p] [-r] [-s]\n");
-	fprintf(stderr, "          [-m {usage|trace|record|size|mctx}]\n");
+	fprintf(stderr, "          [-m {usage|trace|record}]\n");
 	fprintf(stderr, "          [filename]\n\n");
 	fprintf(stderr, "\t-b\tBest-effort parsing (ignore some errors)\n");
 	fprintf(stderr, "\t-d\tRead input as raw binary data\n");
@@ -97,7 +97,7 @@ printmessage(dns_message_t *msg) {
 		isc_mem_put(mctx, buf, len);
 	}
 
-	return (result);
+	return result;
 }
 
 int
@@ -163,7 +163,7 @@ main(int argc, char *argv[]) {
 			break;
 		default:
 			usage();
-			exit(1);
+			exit(EXIT_FAILURE);
 		}
 	}
 
@@ -174,7 +174,7 @@ main(int argc, char *argv[]) {
 		f = fopen(argv[0], "r");
 		if (f == NULL) {
 			fprintf(stderr, "%s: fopen failed\n", argv[0]);
-			exit(1);
+			exit(EXIT_FAILURE);
 		}
 		need_close = true;
 	} else {
@@ -214,7 +214,7 @@ main(int argc, char *argv[]) {
 			if (len % 2 != 0U) {
 				fprintf(stderr, "bad input format: %lu\n",
 					(unsigned long)len);
-				exit(1);
+				exit(EXIT_FAILURE);
 			}
 
 			rp = s;
@@ -239,13 +239,13 @@ main(int argc, char *argv[]) {
 
 			if (isc_buffer_remaininglength(input) < 2) {
 				fprintf(stderr, "premature end of packet\n");
-				exit(1);
+				exit(EXIT_FAILURE);
 			}
 			tcplen = isc_buffer_getuint16(input);
 
 			if (isc_buffer_remaininglength(input) < tcplen) {
 				fprintf(stderr, "premature end of packet\n");
-				exit(1);
+				exit(EXIT_FAILURE);
 			}
 			process_message(input);
 		}
@@ -260,7 +260,7 @@ main(int argc, char *argv[]) {
 	}
 	isc_mem_destroy(&mctx);
 
-	return (0);
+	return 0;
 }
 
 static void
@@ -270,7 +270,7 @@ process_message(isc_buffer_t *source) {
 	int i;
 
 	message = NULL;
-	dns_message_create(mctx, DNS_MESSAGE_INTENTPARSE, &message);
+	dns_message_create(mctx, NULL, NULL, DNS_MESSAGE_INTENTPARSE, &message);
 
 	result = dns_message_parse(message, source, parseflags);
 	if (result == DNS_R_RECOVERABLE) {
@@ -286,7 +286,7 @@ process_message(isc_buffer_t *source) {
 	}
 
 	if (dorender) {
-		unsigned char b2[64 * 1024];
+		unsigned char b2[65535];
 		isc_buffer_t buffer;
 		dns_compress_t cctx;
 
@@ -339,7 +339,8 @@ process_message(isc_buffer_t *source) {
 			isc_mem_stats(mctx, stdout);
 		}
 
-		dns_message_create(mctx, DNS_MESSAGE_INTENTPARSE, &message);
+		dns_message_create(mctx, NULL, NULL, DNS_MESSAGE_INTENTPARSE,
+				   &message);
 
 		result = dns_message_parse(message, &buffer, parseflags);
 		CHECKRESULT(result, "dns_message_parse failed");

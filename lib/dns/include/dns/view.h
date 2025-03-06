@@ -139,6 +139,8 @@ struct dns_view {
 	dns_acl_t	     *upfwdacl;
 	dns_acl_t	     *denyansweracl;
 	dns_acl_t	     *nocasecompress;
+	dns_acl_t	     *proxyacl;
+	dns_acl_t	     *proxyonacl;
 	bool		      msgcompression;
 	dns_nametree_t	     *answeracl_exclude;
 	dns_nametree_t	     *denyanswernames;
@@ -165,22 +167,28 @@ struct dns_view {
 	uint16_t	      maxudp;
 	dns_ttl_t	      staleanswerttl;
 	dns_stale_answer_t    staleanswersok;	  /* rndc setting */
-	bool		      staleanswersenable; /* named.conf setting
-						   * */
-	uint32_t	  staleanswerclienttimeout;
-	uint16_t	  nocookieudp;
-	uint16_t	  padding;
-	dns_acl_t	 *pad_acl;
-	unsigned int	  maxbits;
-	dns_dns64list_t	  dns64;
-	unsigned int	  dns64cnt;
-	dns_rpz_zones_t	 *rpzs;
-	dns_catz_zones_t *catzs;
-	dns_dlzdblist_t	  dlz_searched;
-	dns_dlzdblist_t	  dlz_unsearched;
-	uint32_t	  fail_ttl;
-	dns_badcache_t	 *failcache;
-	unsigned int	  udpsize;
+	bool		      staleanswersenable; /* named.conf setting */
+	uint32_t	      staleanswerclienttimeout;
+	uint16_t	      nocookieudp;
+	uint16_t	      padding;
+	dns_acl_t	     *pad_acl;
+	unsigned int	      maxbits;
+	dns_dns64list_t	      dns64;
+	unsigned int	      dns64cnt;
+	bool		      usedns64;
+	dns_rpz_zones_t	     *rpzs;
+	dns_catz_zones_t     *catzs;
+	dns_dlzdblist_t	      dlz_searched;
+	dns_dlzdblist_t	      dlz_unsearched;
+	uint32_t	      fail_ttl;
+	dns_badcache_t	     *failcache;
+	unsigned int	      udpsize;
+	uint32_t	      sig0key_checks_limit;
+	uint32_t	      sig0message_checks_limit;
+	uint32_t	      maxrrperset;
+	uint32_t	      maxtypepername;
+	uint16_t	      max_queries;
+	uint8_t		      max_restarts;
 
 	/*
 	 * Configurable data for server use only,
@@ -258,8 +266,9 @@ struct dns_view {
 #endif /* HAVE_LMDB */
 
 isc_result_t
-dns_view_create(isc_mem_t *mctx, dns_dispatchmgr_t *dispmgr,
-		dns_rdataclass_t rdclass, const char *name, dns_view_t **viewp);
+dns_view_create(isc_mem_t *mctx, isc_loopmgr_t *loopmgr,
+		dns_dispatchmgr_t *dispmgr, dns_rdataclass_t rdclass,
+		const char *name, dns_view_t **viewp);
 /*%<
  * Create a view.
  *
@@ -364,8 +373,7 @@ dns_view_weakdetach(dns_view_t **targetp);
  */
 
 isc_result_t
-dns_view_createresolver(dns_view_t *view, isc_loopmgr_t *loopmgr,
-			unsigned int ndisp, isc_nm_t *netmgr,
+dns_view_createresolver(dns_view_t *view, isc_nm_t *netmgr,
 			unsigned int options, isc_tlsctx_cache_t *tlsctx_cache,
 			dns_dispatch_t *dispatchv4, dns_dispatch_t *dispatchv6);
 /*%<
@@ -548,8 +556,11 @@ dns_view_find(dns_view_t *view, const dns_name_t *name, dns_rdatatype_t type,
  * Notes:
  *
  *\li	See the description of dns_db_find() for information about 'options'.
- *	If the caller sets #DNS_DBFIND_GLUEOK, it must ensure that 'name'
- *	and 'type' are appropriate for glue retrieval.
+
+ *\li	If the caller sets #DNS_DBFIND_GLUEOK, it must ensure that 'name'
+ *	and 'type' are appropriate for glue retrieval. Glue found in a
+ *	zone database will be returned without checking the cache for a
+ *	better answer.
  *
  *\li	If 'now' is zero, then the current time will be used.
  *
@@ -1239,6 +1250,18 @@ dns_view_getresolver(dns_view_t *view, dns_resolver_t **resolverp);
  */
 
 void
+dns_view_setmaxrrperset(dns_view_t *view, uint32_t value);
+/*%<
+ * Set the maximum resource records per RRSet that can be cached.
+ */
+
+void
+dns_view_setmaxtypepername(dns_view_t *view, uint32_t value);
+/*%<
+ * Set the maximum resource record types per owner name that can be cached.
+ */
+
+void
 dns_view_setudpsize(dns_view_t *view, uint16_t udpsize);
 /*%<
  * Set the EDNS UDP buffer size advertised by the server.
@@ -1307,6 +1330,30 @@ dns_view_getadb(dns_view_t *view, dns_adb_t **adbp);
  *
  *\li	'view' is a valid view.
  *\li	'adbp' is non-NULL and '*adbp' is NULL.
+ */
+
+void
+dns_view_setmaxrestarts(dns_view_t *view, uint8_t max_restarts);
+/*%<
+ * Set the number of permissible chained queries before we give up,
+ * to prevent CNAME loops. This defaults to 11.
+ *
+ * Requires:
+ *
+ *\li	'view' is valid;
+ *\li	'max_restarts' is greater than 0.
+ */
+
+void
+dns_view_setmaxqueries(dns_view_t *view, uint16_t max_queries);
+/*%
+ * Set the number of permissible outgoing queries before we give up.
+ * This defaults to 200.
+ *
+ * Requires:
+ *
+ *\li	'view' is valid;
+ *\li	'max_queries' is greater than 0.
  */
 
 ISC_LANG_ENDDECLS

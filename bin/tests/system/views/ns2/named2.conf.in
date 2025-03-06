@@ -19,6 +19,7 @@ options {
 	pid-file "named.pid";
 	listen-on { 10.53.0.2; 10.53.0.4; };
 	listen-on-v6 { none; };
+	allow-transfer { any; };
 	recursion yes;
 	dnssec-validation no;
 	notify yes;
@@ -46,7 +47,7 @@ view "internal" {
 
 	zone "." {
 		type hint;
-		file "../../common/root.hint";
+		file "../../_common/root.hint";
 	};
 
 	zone "example" {
@@ -80,7 +81,7 @@ view "external" {
 
 	zone "." {
 		type hint;
-		file "../../common/root.hint";
+		file "../../_common/root.hint";
 	};
 
 	zone "example" {

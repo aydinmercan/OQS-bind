@@ -13,7 +13,6 @@ LDADD +=			\
 
 check_PROGRAMS =	\
 	ascii_test	\
-	aes_test	\
 	async_test	\
 	buffer_test	\
 	counter_test	\
@@ -35,6 +34,9 @@ check_PROGRAMS =	\
 	mutex_test	\
 	netaddr_test	\
 	parse_test	\
+	proxyheader_test	\
+	proxystream_test	\
+	proxyudp_test	\
 	quota_test	\
 	radix_test	\
 	random_test	\
@@ -86,6 +88,10 @@ dnsstream_utils_test_SOURCES =	\
 	dnsstream_utils_test.c \
 	dnsstream_utils_test_data.h
 
+hashmap_test_SOURCES =	\
+	hashmap_test.c	\
+	hashmap_nodes.h
+
 hmac_test_CPPFLAGS =	\
 	$(AM_CPPFLAGS)	\
 	$(OPENSSL_CFLAGS)
@@ -101,6 +107,44 @@ md_test_CPPFLAGS =	\
 md_test_LDADD =		\
 	$(LDADD)	\
 	$(OPENSSL_LIBS)
+
+proxyheader_test_CPPFLAGS =	\
+	$(AM_CPPFLAGS)
+
+proxyheader_test_LDADD =	\
+	$(LDADD)
+
+proxyheader_test_SOURCES =	\
+	proxyheader_test.c \
+	proxyheader_test_data.h
+
+proxystream_test_CPPFLAGS =	\
+	$(AM_CPPFLAGS)		\
+	$(OPENSSL_CFLAGS)
+
+proxystream_test_LDADD =	\
+	$(LDADD)		\
+	$(OPENSSL_LIBS)
+
+proxystream_test_SOURCES =	\
+	proxystream_test.c \
+	netmgr_common.h \
+	netmgr_common.c \
+	stream_shutdown.c
+
+proxyudp_test_CPPFLAGS =	\
+	$(AM_CPPFLAGS)	\
+	$(OPENSSL_CFLAGS)
+
+proxyudp_test_LDADD =	\
+	$(LDADD)	\
+	$(OPENSSL_LIBS)
+
+proxyudp_test_SOURCES =	\
+	proxyudp_test.c	\
+	netmgr_common.h \
+	netmgr_common.c \
+	uv_wrap.h
 
 random_test_LDADD =	\
 	$(LDADD)	\

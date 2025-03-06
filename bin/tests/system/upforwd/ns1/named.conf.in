@@ -26,6 +26,7 @@ options {
 	listen-on { 10.53.0.1; };
 	listen-on tls ephemeral { 10.53.0.1; };
 	listen-on-v6 { none; };
+	allow-transfer { any; };
 	recursion yes;
 	dnssec-validation no;
 	notify yes;
@@ -41,6 +42,12 @@ zone "example2" {
 	type primary;
 	file "example2.db";
 	allow-update { key sig0.example2.; };
+};
+
+zone "example2-toomanykeys" {
+	type primary;
+	file "example2-toomanykeys.db";
+	allow-update { key sig0.example2-toomanykeys.; };
 };
 
 zone "example3" {

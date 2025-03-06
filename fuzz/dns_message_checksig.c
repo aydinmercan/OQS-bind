@@ -141,14 +141,14 @@ LLVMFuzzerInitialize(int *argc ISC_ATTR_UNUSED, char ***argv ISC_ATTR_UNUSED) {
 	wd = mkdtemp(template);
 	if (wd == NULL) {
 		fprintf(stderr, "mkdtemp failed\n");
-		return (1);
+		return 1;
 	}
 
 	snprintf(pathbuf, sizeof(pathbuf), "%s/%s", wd, f1);
 	fd = fopen(pathbuf, "w");
 	if (fd == NULL) {
 		fprintf(stderr, "fopen(%s) failed\n", pathbuf);
-		return (1);
+		return 1;
 	}
 	fputs(c1, fd);
 	fclose(fd);
@@ -157,7 +157,7 @@ LLVMFuzzerInitialize(int *argc ISC_ATTR_UNUSED, char ***argv ISC_ATTR_UNUSED) {
 	fd = fopen(pathbuf, "w");
 	if (fd == NULL) {
 		fprintf(stderr, "fopen(%s) failed\n", pathbuf);
-		return (1);
+		return 1;
 	}
 	fputs(c2, fd);
 	fclose(fd);
@@ -166,7 +166,7 @@ LLVMFuzzerInitialize(int *argc ISC_ATTR_UNUSED, char ***argv ISC_ATTR_UNUSED) {
 	fd = fopen(pathbuf, "w");
 	if (fd == NULL) {
 		fprintf(stderr, "fopen(%s) failed\n", pathbuf);
-		return (1);
+		return 1;
 	}
 	fputs(c3, fd);
 	fclose(fd);
@@ -177,17 +177,18 @@ LLVMFuzzerInitialize(int *argc ISC_ATTR_UNUSED, char ***argv ISC_ATTR_UNUSED) {
 	if (result != ISC_R_SUCCESS) {
 		fprintf(stderr, "dst_lib_init failed: %s\n",
 			isc_result_totext(result));
-		return (1);
+		return 1;
 	}
 	destroy_dst = true;
 
 	isc_loopmgr_create(mctx, 1, &loopmgr);
 
-	result = dns_view_create(mctx, NULL, dns_rdataclass_in, "view", &view);
+	result = dns_view_create(mctx, loopmgr, NULL, dns_rdataclass_in, "view",
+				 &view);
 	if (result != ISC_R_SUCCESS) {
 		fprintf(stderr, "dns_view_create failed: %s\n",
 			isc_result_totext(result));
-		return (1);
+		return 1;
 	}
 
 	dns_tsigkeyring_create(mctx, &ring);
@@ -197,7 +198,7 @@ LLVMFuzzerInitialize(int *argc ISC_ATTR_UNUSED, char ***argv ISC_ATTR_UNUSED) {
 	if (result != ISC_R_SUCCESS) {
 		fprintf(stderr, "dns_name_fromstring failed: %s\n",
 			isc_result_totext(result));
-		return (1);
+		return 1;
 	}
 
 	result = dns_tsigkey_create(name, DST_ALG_HMACSHA256, secret,
@@ -205,20 +206,20 @@ LLVMFuzzerInitialize(int *argc ISC_ATTR_UNUSED, char ***argv ISC_ATTR_UNUSED) {
 	if (result != ISC_R_SUCCESS) {
 		fprintf(stderr, "dns_tsigkey_create failed: %s\n",
 			isc_result_totext(result));
-		return (1);
+		return 1;
 	}
 	result = dns_tsigkeyring_add(ring, tsigkey);
 	if (result != ISC_R_SUCCESS) {
 		fprintf(stderr, "dns_tsigkeyring_add failed: %s\n",
 			isc_result_totext(result));
-		return (1);
+		return 1;
 	}
 
 	result = dns_name_fromstring(name, "sig0key", dns_rootname, 0, NULL);
 	if (result != ISC_R_SUCCESS) {
 		fprintf(stderr, "dns_name_fromstring failed: %s\n",
 			isc_result_totext(result));
-		return (1);
+		return 1;
 	}
 
 	dns_zone_create(&zone, mctx, 0);
@@ -227,7 +228,7 @@ LLVMFuzzerInitialize(int *argc ISC_ATTR_UNUSED, char ***argv ISC_ATTR_UNUSED) {
 	if (result != ISC_R_SUCCESS) {
 		fprintf(stderr, "dns_zone_setorigin failed: %s\n",
 			isc_result_totext(result));
-		return (1);
+		return 1;
 	}
 
 	dns_zone_setclass(zone, view->rdclass);
@@ -237,7 +238,7 @@ LLVMFuzzerInitialize(int *argc ISC_ATTR_UNUSED, char ***argv ISC_ATTR_UNUSED) {
 	if (result != ISC_R_SUCCESS) {
 		fprintf(stderr, "dns_zone_setkeydirectory failed: %s\n",
 			isc_result_totext(result));
-		return (1);
+		return 1;
 	}
 
 	result = dns_zone_setfile(zone, pathbuf, dns_masterformat_text,
@@ -245,21 +246,21 @@ LLVMFuzzerInitialize(int *argc ISC_ATTR_UNUSED, char ***argv ISC_ATTR_UNUSED) {
 	if (result != ISC_R_SUCCESS) {
 		fprintf(stderr, "dns_zone_setfile failed: %s\n",
 			isc_result_totext(result));
-		return (1);
+		return 1;
 	}
 
 	result = dns_zone_load(zone, false);
 	if (result != ISC_R_SUCCESS) {
 		fprintf(stderr, "dns_zone_load failed: %s\n",
 			isc_result_totext(result));
-		return (1);
+		return 1;
 	}
 
 	result = dns_view_addzone(view, zone);
 	if (result != ISC_R_SUCCESS) {
 		fprintf(stderr, "dns_view_addzone failed: %s\n",
 			isc_result_totext(result));
-		return (1);
+		return 1;
 	}
 
 	dns_zone_setview(zone, view);
@@ -267,7 +268,7 @@ LLVMFuzzerInitialize(int *argc ISC_ATTR_UNUSED, char ***argv ISC_ATTR_UNUSED) {
 
 	dns_zone_detach(&zone);
 
-	return (0);
+	return 0;
 }
 
 static isc_result_t
@@ -318,7 +319,7 @@ create_message(dns_message_t **messagep, const uint8_t *data, size_t size,
 		isc_buffer_putmem(&b, data, size);
 	}
 
-	dns_message_create(mctx, DNS_MESSAGE_INTENTPARSE, &message);
+	dns_message_create(mctx, NULL, NULL, DNS_MESSAGE_INTENTPARSE, &message);
 
 	result = dns_message_parse(message, &b, 0);
 	if (debug) {
@@ -343,7 +344,7 @@ create_message(dns_message_t **messagep, const uint8_t *data, size_t size,
 		}
 		*messagep = message;
 	}
-	return (result);
+	return result;
 }
 
 int
@@ -372,7 +373,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 	 * opcode.
 	 */
 	if (size > 65535 || size < 2) {
-		return (0);
+		return 0;
 	}
 
 	addasig = (*data & 0x80) != 0;
@@ -397,7 +398,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
 	result = create_message(&message, data, size, addasig, addtsig);
 	if (result != ISC_R_SUCCESS) {
-		return (0);
+		return 0;
 	}
 
 	/*
@@ -416,7 +417,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 		if (setquerytsig) {
 			isc_buffer_t b;
 			unsigned char hmacname[] = HMACSHA256;
-			unsigned char hmac[32] = {
+			unsigned char hmacvalue[32] = {
 				0x22, 0x4d, 0x58, 0x07, 0x64, 0x8d, 0x14, 0x00,
 				0x9d, 0x8e, 0xfc, 0x1c, 0xd0, 0x49, 0x55, 0xe9,
 				0xcc, 0x90, 0x21, 0x87, 0x3b, 0x5f, 0xaf, 0x5c,
@@ -434,7 +435,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 			isc_buffer_putuint16(&b, 300);	      /* Fudge */
 			isc_buffer_putuint16(&b, 32);	      /* Mac Length */
 			/* Mac */
-			isc_buffer_putmem(&b, hmac, 32);
+			isc_buffer_putmem(&b, hmacvalue, 32);
 			isc_buffer_putuint16(&b, 7674); /* Original Id */
 			isc_buffer_putuint16(&b, 0);	/* Error */
 			isc_buffer_putuint16(&b, 0);	/* Other len */
@@ -476,5 +477,5 @@ cleanup:
 		dns_message_detach(&message);
 	}
 
-	return (0);
+	return 0;
 }

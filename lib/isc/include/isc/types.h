@@ -13,6 +13,7 @@
 
 #pragma once
 
+#include <isc/atomic.h>
 #include <isc/result.h>
 
 /*! \file isc/types.h
@@ -72,6 +73,7 @@ typedef ISC_LIST(isc_sockaddr_t) isc_sockaddrlist_t; /*%< Socket Address List
 						      * */
 typedef struct isc_stats      isc_stats_t;	     /*%< Statistics */
 typedef int_fast64_t	      isc_statscounter_t;
+typedef atomic_int_fast64_t   isc_atomic_statscounter_t;
 typedef struct isc_symtab     isc_symtab_t;	/*%< Symbol Table */
 typedef struct isc_textregion isc_textregion_t; /*%< Text Region */
 typedef struct isc_time	      isc_time_t;	/*%< Time */
@@ -98,13 +100,17 @@ typedef enum isc_nmsocket_type {
 	isc_nm_tlssocket = 1 << 3,
 	isc_nm_httpsocket = 1 << 4,
 	isc_nm_streamdnssocket = 1 << 5,
+	isc_nm_proxystreamsocket = 1 << 6,
+	isc_nm_proxyudpsocket = 1 << 7,
 	isc_nm_maxsocket,
 
 	isc_nm_udplistener, /* Aggregate of nm_udpsocks */
 	isc_nm_tcplistener,
 	isc_nm_tlslistener,
 	isc_nm_httplistener,
-	isc_nm_streamdnslistener
+	isc_nm_streamdnslistener,
+	isc_nm_proxystreamlistener,
+	isc_nm_proxyudplistener
 } isc_nmsocket_type;
 
 typedef isc_nmsocket_type isc_nmsocket_type_t;

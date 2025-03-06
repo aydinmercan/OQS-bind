@@ -30,13 +30,6 @@ const char *
 qp_test_keytoascii(dns_qpkey_t key, size_t len);
 
 /*
- * Convert a trie lookup key back into a DNS name. Unlike the previous
- * functions, this is a complete inverse of dns_qpkey_fromname().
- */
-void
-qp_test_keytoname(const dns_qpkey_t key, size_t len, dns_name_t *name);
-
-/*
  * The maximum height of the trie
  */
 size_t
@@ -91,3 +84,9 @@ qp_test_dumptrie(dns_qpreadable_t qp);
  */
 void
 qp_test_dumpdot(dns_qp_t *qp);
+
+/*
+ * Print the name encoded in a QP key.
+ */
+void
+qp_test_printkey(const dns_qpkey_t key, size_t keylen);

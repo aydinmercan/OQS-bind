@@ -241,7 +241,7 @@ cleanup:
 		isc_mem_putanddetach(&env->mctx, env, sizeof(dns_dtenv_t));
 	}
 
-	return (result);
+	return result;
 }
 
 isc_result_t
@@ -257,9 +257,9 @@ dns_dt_setupfile(dns_dtenv_t *env, uint64_t max_size, int rolls,
 		if (max_size == 0 && rolls == ISC_LOG_ROLLINFINITE &&
 		    suffix == isc_log_rollsuffix_increment)
 		{
-			return (ISC_R_SUCCESS);
+			return ISC_R_SUCCESS;
 		} else {
-			return (ISC_R_INVALIDFILE);
+			return ISC_R_INVALIDFILE;
 		}
 	}
 
@@ -267,7 +267,7 @@ dns_dt_setupfile(dns_dtenv_t *env, uint64_t max_size, int rolls,
 	env->rolls = rolls;
 	env->suffix = suffix;
 
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 isc_result_t
@@ -382,7 +382,7 @@ cleanup:
 
 	isc_loopmgr_resume(loopmgr);
 
-	return (result);
+	return result;
 }
 
 static isc_result_t
@@ -405,21 +405,21 @@ toregion(dns_dtenv_t *env, isc_region_t *r, const char *str) {
 		r->length = strlen((char *)p);
 	}
 
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 isc_result_t
 dns_dt_setidentity(dns_dtenv_t *env, const char *identity) {
 	REQUIRE(VALID_DTENV(env));
 
-	return (toregion(env, &env->identity, identity));
+	return toregion(env, &env->identity, identity);
 }
 
 isc_result_t
 dns_dt_setversion(dns_dtenv_t *env, const char *version) {
 	REQUIRE(VALID_DTENV(env));
 
-	return (toregion(env, &env->version, version));
+	return toregion(env, &env->version, version);
 }
 
 static void
@@ -435,7 +435,7 @@ dt_queue(dns_dtenv_t *env) {
 	unsigned int generation;
 
 	if (env->iothr == NULL) {
-		return (NULL);
+		return NULL;
 	}
 
 	generation = atomic_load_acquire(&global_generation);
@@ -448,7 +448,7 @@ dt_queue(dns_dtenv_t *env) {
 		set_dt_ioq(generation, ioq);
 	}
 
-	return (dt_ioq.ioq);
+	return dt_ioq.ioq;
 }
 
 void
@@ -466,10 +466,10 @@ dns_dt_getstats(dns_dtenv_t *env, isc_stats_t **statsp) {
 	REQUIRE(statsp != NULL && *statsp == NULL);
 
 	if (env->stats == NULL) {
-		return (ISC_R_NOTFOUND);
+		return ISC_R_NOTFOUND;
 	}
 	isc_stats_attach(env->stats, statsp);
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static void
@@ -532,17 +532,17 @@ pack_dt(const Dnstap__Dnstap *d, void **buf, size_t *sz) {
 	/* Need to use malloc() here because protobuf uses free() */
 	sbuf.data = malloc(sbuf.alloced);
 	if (sbuf.data == NULL) {
-		return (ISC_R_NOMEMORY);
+		return ISC_R_NOMEMORY;
 	}
 	sbuf.must_free_data = 1;
 
 	*sz = dnstap__dnstap__pack_to_buffer(d, (ProtobufCBuffer *)&sbuf);
 	if (sbuf.data == NULL) {
-		return (ISC_R_FAILURE);
+		return ISC_R_FAILURE;
 	}
 	*buf = sbuf.data;
 
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static void
@@ -603,33 +603,33 @@ static Dnstap__Message__Type
 dnstap_type(dns_dtmsgtype_t msgtype) {
 	switch (msgtype) {
 	case DNS_DTTYPE_SQ:
-		return (DNSTAP__MESSAGE__TYPE__STUB_QUERY);
+		return DNSTAP__MESSAGE__TYPE__STUB_QUERY;
 	case DNS_DTTYPE_SR:
-		return (DNSTAP__MESSAGE__TYPE__STUB_RESPONSE);
+		return DNSTAP__MESSAGE__TYPE__STUB_RESPONSE;
 	case DNS_DTTYPE_CQ:
-		return (DNSTAP__MESSAGE__TYPE__CLIENT_QUERY);
+		return DNSTAP__MESSAGE__TYPE__CLIENT_QUERY;
 	case DNS_DTTYPE_CR:
-		return (DNSTAP__MESSAGE__TYPE__CLIENT_RESPONSE);
+		return DNSTAP__MESSAGE__TYPE__CLIENT_RESPONSE;
 	case DNS_DTTYPE_AQ:
-		return (DNSTAP__MESSAGE__TYPE__AUTH_QUERY);
+		return DNSTAP__MESSAGE__TYPE__AUTH_QUERY;
 	case DNS_DTTYPE_AR:
-		return (DNSTAP__MESSAGE__TYPE__AUTH_RESPONSE);
+		return DNSTAP__MESSAGE__TYPE__AUTH_RESPONSE;
 	case DNS_DTTYPE_RQ:
-		return (DNSTAP__MESSAGE__TYPE__RESOLVER_QUERY);
+		return DNSTAP__MESSAGE__TYPE__RESOLVER_QUERY;
 	case DNS_DTTYPE_RR:
-		return (DNSTAP__MESSAGE__TYPE__RESOLVER_RESPONSE);
+		return DNSTAP__MESSAGE__TYPE__RESOLVER_RESPONSE;
 	case DNS_DTTYPE_FQ:
-		return (DNSTAP__MESSAGE__TYPE__FORWARDER_QUERY);
+		return DNSTAP__MESSAGE__TYPE__FORWARDER_QUERY;
 	case DNS_DTTYPE_FR:
-		return (DNSTAP__MESSAGE__TYPE__FORWARDER_RESPONSE);
+		return DNSTAP__MESSAGE__TYPE__FORWARDER_RESPONSE;
 	case DNS_DTTYPE_TQ:
-		return (DNSTAP__MESSAGE__TYPE__TOOL_QUERY);
+		return DNSTAP__MESSAGE__TYPE__TOOL_QUERY;
 	case DNS_DTTYPE_TR:
-		return (DNSTAP__MESSAGE__TYPE__TOOL_RESPONSE);
+		return DNSTAP__MESSAGE__TYPE__TOOL_RESPONSE;
 	case DNS_DTTYPE_UQ:
-		return (DNSTAP__MESSAGE__TYPE__UPDATE_QUERY);
+		return DNSTAP__MESSAGE__TYPE__UPDATE_QUERY;
 	case DNS_DTTYPE_UR:
-		return (DNSTAP__MESSAGE__TYPE__UPDATE_RESPONSE);
+		return DNSTAP__MESSAGE__TYPE__UPDATE_RESPONSE;
 	default:
 		UNREACHABLE();
 	}
@@ -643,7 +643,7 @@ cpbuf(isc_buffer_t *buf, ProtobufCBinaryData *p, protobuf_c_boolean *has) {
 }
 
 static void
-setaddr(dns_dtmsg_t *dm, isc_sockaddr_t *sa, bool tcp,
+setaddr(dns_dtmsg_t *dm, isc_sockaddr_t *sa, dns_transport_type_t transport,
 	ProtobufCBinaryData *addr, protobuf_c_boolean *has_addr, uint32_t *port,
 	protobuf_c_boolean *has_port) {
 	int family = isc_sockaddr_pf(sa);
@@ -664,10 +664,22 @@ setaddr(dns_dtmsg_t *dm, isc_sockaddr_t *sa, bool tcp,
 		*port = ntohs(sa->type.sin.sin_port);
 	}
 
-	if (tcp) {
+	switch (transport) {
+	case DNS_TRANSPORT_TCP:
 		dm->m.socket_protocol = DNSTAP__SOCKET_PROTOCOL__TCP;
-	} else {
+		break;
+	case DNS_TRANSPORT_UDP:
 		dm->m.socket_protocol = DNSTAP__SOCKET_PROTOCOL__UDP;
+		break;
+	case DNS_TRANSPORT_TLS:
+		dm->m.socket_protocol = DNSTAP__SOCKET_PROTOCOL__DOT;
+		break;
+	case DNS_TRANSPORT_HTTP:
+		dm->m.socket_protocol = DNSTAP__SOCKET_PROTOCOL__DOH;
+		break;
+	case DNS_TRANSPORT_NONE:
+	case DNS_TRANSPORT_COUNT:
+		UNREACHABLE();
 	}
 
 	dm->m.has_socket_protocol = 1;
@@ -732,8 +744,9 @@ unlock_and_return:
 
 void
 dns_dt_send(dns_view_t *view, dns_dtmsgtype_t msgtype, isc_sockaddr_t *qaddr,
-	    isc_sockaddr_t *raddr, bool tcp, isc_region_t *zone,
-	    isc_time_t *qtime, isc_time_t *rtime, isc_buffer_t *buf) {
+	    isc_sockaddr_t *raddr, dns_transport_type_t transport,
+	    isc_region_t *zone, isc_time_t *qtime, isc_time_t *rtime,
+	    isc_buffer_t *buf) {
 	isc_time_t now, *t;
 	dns_dtmsg_t dm;
 
@@ -833,12 +846,12 @@ dns_dt_send(dns_view_t *view, dns_dtmsgtype_t msgtype, isc_sockaddr_t *qaddr,
 	}
 
 	if (qaddr != NULL) {
-		setaddr(&dm, qaddr, tcp, &dm.m.query_address,
+		setaddr(&dm, qaddr, transport, &dm.m.query_address,
 			&dm.m.has_query_address, &dm.m.query_port,
 			&dm.m.has_query_port);
 	}
 	if (raddr != NULL) {
-		setaddr(&dm, raddr, tcp, &dm.m.response_address,
+		setaddr(&dm, raddr, transport, &dm.m.response_address,
 			&dm.m.has_response_address, &dm.m.response_port,
 			&dm.m.has_response_port);
 	}
@@ -854,11 +867,11 @@ putstr(isc_buffer_t **b, const char *str) {
 
 	result = isc_buffer_reserve(*b, strlen(str));
 	if (result != ISC_R_SUCCESS) {
-		return (ISC_R_NOSPACE);
+		return ISC_R_NOSPACE;
 	}
 
 	isc_buffer_putstr(*b, str);
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static isc_result_t
@@ -867,17 +880,17 @@ putaddr(isc_buffer_t **b, isc_region_t *ip) {
 
 	if (ip->length == 4) {
 		if (!inet_ntop(AF_INET, ip->base, buf, sizeof(buf))) {
-			return (ISC_R_FAILURE);
+			return ISC_R_FAILURE;
 		}
 	} else if (ip->length == 16) {
 		if (!inet_ntop(AF_INET6, ip->base, buf, sizeof(buf))) {
-			return (ISC_R_FAILURE);
+			return ISC_R_FAILURE;
 		}
 	} else {
-		return (ISC_R_BADADDRESSFORM);
+		return ISC_R_BADADDRESSFORM;
 	}
 
-	return (putstr(b, buf));
+	return putstr(b, buf);
 }
 
 static bool
@@ -890,30 +903,30 @@ dnstap_file(struct fstrm_reader *r) {
 
 	res = fstrm_reader_get_control(r, FSTRM_CONTROL_START, &control);
 	if (res != fstrm_res_success) {
-		return (false);
+		return false;
 	}
 
 	res = fstrm_control_get_num_field_content_type(control, &n);
 	if (res != fstrm_res_success) {
-		return (false);
+		return false;
 	}
 	if (n > 0) {
 		res = fstrm_control_get_field_content_type(control, 0, &rtype,
 							   &rlen);
 		if (res != fstrm_res_success) {
-			return (false);
+			return false;
 		}
 
 		if (rlen != dlen) {
-			return (false);
+			return false;
 		}
 
 		if (memcmp(DNSTAP_CONTENT_TYPE, rtype, dlen) == 0) {
-			return (true);
+			return true;
 		}
 	}
 
-	return (false);
+	return false;
 }
 
 isc_result_t
@@ -977,7 +990,7 @@ cleanup:
 	if (handle != NULL) {
 		isc_mem_put(mctx, handle, sizeof(*handle));
 	}
-	return (result);
+	return result;
 }
 
 isc_result_t
@@ -995,14 +1008,14 @@ dns_dt_getframe(dns_dthandle_t *handle, uint8_t **bufp, size_t *sizep) {
 	switch (res) {
 	case fstrm_res_success:
 		if (data == NULL) {
-			return (ISC_R_FAILURE);
+			return ISC_R_FAILURE;
 		}
 		*bufp = UNCONST(data);
-		return (ISC_R_SUCCESS);
+		return ISC_R_SUCCESS;
 	case fstrm_res_stop:
-		return (ISC_R_NOMORE);
+		return ISC_R_NOMORE;
 	default:
-		return (ISC_R_FAILURE);
+		return ISC_R_FAILURE;
 	}
 }
 
@@ -1117,7 +1130,7 @@ dns_dt_parse(isc_mem_t *mctx, isc_region_t *src, dns_dtdata_t **destp) {
 
 	isc_buffer_init(&b, d->msgdata.base, d->msgdata.length);
 	isc_buffer_add(&b, d->msgdata.length);
-	dns_message_create(mctx, DNS_MESSAGE_INTENTPARSE, &d->msg);
+	dns_message_create(mctx, NULL, NULL, DNS_MESSAGE_INTENTPARSE, &d->msg);
 	result = dns_message_parse(d->msg, &b, 0);
 	if (result != ISC_R_SUCCESS) {
 		if (result != DNS_R_RECOVERABLE) {
@@ -1162,11 +1175,27 @@ dns_dt_parse(isc_mem_t *mctx, isc_region_t *src, dns_dtdata_t **destp) {
 			protobuf_c_enum_descriptor_get_value(
 				&dnstap__socket_protocol__descriptor,
 				m->socket_protocol);
-		if (type != NULL && type->value == DNSTAP__SOCKET_PROTOCOL__TCP)
-		{
-			d->tcp = true;
+
+		if (type != NULL) {
+			switch (type->value) {
+			case DNSTAP__SOCKET_PROTOCOL__DNSCryptUDP:
+			case DNSTAP__SOCKET_PROTOCOL__DOQ:
+			case DNSTAP__SOCKET_PROTOCOL__UDP:
+				d->transport = DNS_TRANSPORT_UDP;
+				break;
+			case DNSTAP__SOCKET_PROTOCOL__DNSCryptTCP:
+			case DNSTAP__SOCKET_PROTOCOL__TCP:
+				d->transport = DNS_TRANSPORT_TCP;
+				break;
+			case DNSTAP__SOCKET_PROTOCOL__DOT:
+				d->transport = DNS_TRANSPORT_TLS;
+				break;
+			case DNSTAP__SOCKET_PROTOCOL__DOH:
+				d->transport = DNS_TRANSPORT_HTTP;
+				break;
+			}
 		} else {
-			d->tcp = false;
+			d->transport = DNS_TRANSPORT_UDP;
 		}
 	}
 
@@ -1193,7 +1222,7 @@ cleanup:
 		dns_dtdata_free(&d);
 	}
 
-	return (result);
+	return result;
 }
 
 isc_result_t
@@ -1265,7 +1294,7 @@ dns_dt_datatotext(dns_dtdata_t *d, isc_buffer_t **dest) {
 		CHECK(putstr(dest, "UR "));
 		break;
 	default:
-		return (DNS_R_BADDNSTAP);
+		return DNS_R_BADDNSTAP;
 	}
 
 	/* Query and response addresses */
@@ -1292,10 +1321,24 @@ dns_dt_datatotext(dns_dtdata_t *d, isc_buffer_t **dest) {
 	CHECK(putstr(dest, " "));
 
 	/* Protocol */
-	if (d->tcp) {
-		CHECK(putstr(dest, "TCP "));
-	} else {
+	switch (d->transport) {
+	case DNS_TRANSPORT_NONE:
+		CHECK(putstr(dest, "NUL "));
+		break;
+	case DNS_TRANSPORT_UDP:
 		CHECK(putstr(dest, "UDP "));
+		break;
+	case DNS_TRANSPORT_TCP:
+		CHECK(putstr(dest, "TCP "));
+		break;
+	case DNS_TRANSPORT_TLS:
+		CHECK(putstr(dest, "DOT "));
+		break;
+	case DNS_TRANSPORT_HTTP:
+		CHECK(putstr(dest, "DOH "));
+		break;
+	case DNS_TRANSPORT_COUNT:
+		UNREACHABLE();
 	}
 
 	/* Message size */
@@ -1331,7 +1374,7 @@ dns_dt_datatotext(dns_dtdata_t *d, isc_buffer_t **dest) {
 	isc_buffer_putuint8(*dest, 0);
 
 cleanup:
-	return (result);
+	return result;
 }
 
 void

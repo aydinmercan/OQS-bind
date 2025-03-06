@@ -24,9 +24,6 @@ we support in DNSSEC are as follows:
 |             XMSS             |         20          |
 |            XMSSMT            |         21          |
 
-We opted to start the algorithm IDs at 17 because of the discussion seen
-[here](https://mailarchive.ietf.org/arch/msg/dnsop/2xKvE-g1WU5VozEDN7-h2e5y-MQ/).
-
 ### DoT/DoH Algorithms
 These have not been tested, but in principle all algorithms supported by
 [oqs-proivder](https://github.com/open-quantum-safe/oqs-provider) should work.

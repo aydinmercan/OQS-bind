@@ -33,11 +33,12 @@ options {
 	recursion yes;
 	dnssec-validation yes;
 	notify no;
+	minimal-responses no;
 };
 
 zone "." {
 	type hint;
-	file "../../common/root.hint";
+	file "../../_common/root.hint";
 };
 
 zone "example" {
@@ -57,6 +58,11 @@ zone "example.info" {
 };
 
 zone "undelegated" {
+	type static-stub;
+	server-addresses { 10.53.0.3; };
+};
+
+zone "unsigned" {
 	type static-stub;
 	server-addresses { 10.53.0.3; };
 };

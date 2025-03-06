@@ -21,6 +21,7 @@ options {
 	pid-file "named.pid";
 	listen-on { 10.53.0.2; };
 	listen-on-v6 { none; };
+	allow-transfer { any; };
 	recursion no;
 	notify yes;
 	dnssec-validation yes;
@@ -67,12 +68,12 @@ dnssec-policy "optout" {
 		zsk key-directory lifetime unlimited algorithm @DEFAULT_ALGORITHM@;
 	};
 
-	nsec3param iterations 1 optout yes salt-length 0;
+	nsec3param iterations 0 optout yes salt-length 0;
 };
 
 zone "." {
 	type hint;
-	file "../../common/root.hint";
+	file "../../_common/root.hint";
 };
 
 zone "example" {
@@ -134,14 +135,14 @@ zone "child.optout.example" {
 	dnssec-policy optout;
 };
 
-zone "optout-with-ent" {
+zone "nsec3-with-ent" {
 	type primary;
-	file "optout-with-ent.db";
+	file "nsec3-with-ent.db";
 	allow-query { any; };
 	allow-transfer { any; };
 	allow-update { any; };
 	inline-signing no;
-	dnssec-policy optout;
+	dnssec-policy nsec3;
 };
 
 include "trusted.conf";

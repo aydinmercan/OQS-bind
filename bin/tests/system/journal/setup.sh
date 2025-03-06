@@ -13,8 +13,6 @@
 
 . ../conf.sh
 
-$SHELL clean.sh
-
 copy_setports ns1/named.conf.in ns1/named.conf
 cp ns1/generic.db.in ns1/changed.db
 cp ns1/changed.ver1.jnl.saved ns1/changed.db.jnl
@@ -44,7 +42,7 @@ cp ns1/generic.db.in ns1/maxjournal2.db
 cp ns1/maxjournal2.jnl.saved ns1/maxjournal2.db.jnl
 
 cp ns1/managed-keys.bind.in ns1/managed-keys.bind
-$PERL ../fromhex.pl < ns1/managed-keys.bind.jnl.in > ns1/managed-keys.bind.jnl
+$PERL ../fromhex.pl <ns1/managed-keys.bind.jnl.in >ns1/managed-keys.bind.jnl
 
 copy_setports ns2/named.conf.in ns2/named.conf
 cp ns2/managed-keys.bind.in ns2/managed-keys.bind

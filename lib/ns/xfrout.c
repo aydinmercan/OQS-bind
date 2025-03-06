@@ -247,23 +247,23 @@ ixfr_rrstream_create(isc_mem_t *mctx, const char *journal_filename,
 				    sizep));
 
 	*sp = (rrstream_t *)s;
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 
 failure:
 	ixfr_rrstream_destroy((rrstream_t **)(void *)&s);
-	return (result);
+	return result;
 }
 
 static isc_result_t
 ixfr_rrstream_first(rrstream_t *rs) {
 	ixfr_rrstream_t *s = (ixfr_rrstream_t *)rs;
-	return (dns_journal_first_rr(s->journal));
+	return dns_journal_first_rr(s->journal);
 }
 
 static isc_result_t
 ixfr_rrstream_next(rrstream_t *rs) {
 	ixfr_rrstream_t *s = (ixfr_rrstream_t *)rs;
-	return (dns_journal_next_rr(s->journal));
+	return dns_journal_next_rr(s->journal);
 }
 
 static void
@@ -328,11 +328,11 @@ axfr_rrstream_create(isc_mem_t *mctx, dns_db_t *db, dns_dbversion_t *ver,
 	s->it_valid = true;
 
 	*sp = (rrstream_t *)s;
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 
 failure:
 	axfr_rrstream_destroy((rrstream_t **)(void *)&s);
-	return (result);
+	return result;
 }
 
 static isc_result_t
@@ -341,7 +341,7 @@ axfr_rrstream_first(rrstream_t *rs) {
 	isc_result_t result;
 	result = dns_rriterator_first(&s->it);
 	if (result != ISC_R_SUCCESS) {
-		return (result);
+		return result;
 	}
 	/* Skip SOA records. */
 	for (;;) {
@@ -358,7 +358,7 @@ axfr_rrstream_first(rrstream_t *rs) {
 			break;
 		}
 	}
-	return (result);
+	return result;
 }
 
 static isc_result_t
@@ -381,7 +381,7 @@ axfr_rrstream_next(rrstream_t *rs) {
 			break;
 		}
 	}
-	return (result);
+	return result;
 }
 
 static void
@@ -448,23 +448,23 @@ soa_rrstream_create(isc_mem_t *mctx, dns_db_t *db, dns_dbversion_t *ver,
 				    &s->soa_tuple));
 
 	*sp = (rrstream_t *)s;
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 
 failure:
 	soa_rrstream_destroy((rrstream_t **)(void *)&s);
-	return (result);
+	return result;
 }
 
 static isc_result_t
 soa_rrstream_first(rrstream_t *rs) {
 	UNUSED(rs);
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static isc_result_t
 soa_rrstream_next(rrstream_t *rs) {
 	UNUSED(rs);
-	return (ISC_R_NOMORE);
+	return ISC_R_NOMORE;
 }
 
 static void
@@ -552,7 +552,7 @@ compound_rrstream_create(isc_mem_t *mctx, rrstream_t **soa_stream,
 	*data_stream = NULL;
 	*soa_stream = NULL;
 	*sp = (rrstream_t *)s;
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static isc_result_t
@@ -563,7 +563,7 @@ compound_rrstream_first(rrstream_t *rs) {
 		rrstream_t *curstream = s->components[s->state];
 		s->result = curstream->methods->first(curstream);
 	} while (s->result == ISC_R_NOMORE && s->state < 2);
-	return (s->result);
+	return s->result;
 }
 
 static isc_result_t
@@ -578,13 +578,13 @@ compound_rrstream_next(rrstream_t *rs) {
 		 */
 		curstream->methods->pause(curstream);
 		if (s->state == 2) {
-			return (ISC_R_NOMORE);
+			return ISC_R_NOMORE;
 		}
 		s->state++;
 		curstream = s->components[s->state];
 		s->result = curstream->methods->first(curstream);
 	}
-	return (s->result);
+	return s->result;
 }
 
 static void
@@ -674,6 +674,9 @@ typedef struct {
 	isc_nm_timer_t *maxtime_timer;
 
 	uint64_t idletime; /*%< XFR idle timeout (in ms) */
+
+	/* Delayed send */
+	isc_nm_timer_t *delayed_send_timer;
 } xfrout_ctx_t;
 
 static void
@@ -711,6 +714,9 @@ xfrout_log1(ns_client_t *client, dns_name_t *zonename, dns_rdataclass_t rdclass,
 static void
 xfrout_log(xfrout_ctx_t *xfr, int level, const char *fmt, ...)
 	ISC_FORMAT_PRINTF(3, 4);
+
+static void
+xfrout_delayed_timeout(void *arg, isc_result_t result);
 
 /**************************************************************************/
 
@@ -1248,6 +1254,9 @@ xfrout_ctx_create(isc_mem_t *mctx, ns_client_t *client, unsigned int id,
 	isc_nm_timer_create(xfr->client->handle, xfrout_client_timeout, xfr,
 			    &xfr->maxtime_timer);
 
+	isc_nm_timer_create(xfr->client->handle, xfrout_delayed_timeout, xfr,
+			    &xfr->delayed_send_timer);
+
 	/*
 	 * Allocate a temporary buffer for the uncompressed response
 	 * message data.  The buffer size must be 65535 bytes
@@ -1258,7 +1267,7 @@ xfrout_ctx_create(isc_mem_t *mctx, ns_client_t *client, unsigned int id,
 	 * Note that although 65535-byte RRs are allowed in principle, they
 	 * cannot be zone-transferred (at least not if uncompressible),
 	 * because the message and RR headers would push the size of the
-	 * TCP message over the 65536 byte limit.
+	 * TCP message over the 65535 byte limit.
 	 */
 	mem = isc_mem_get(mctx, len);
 	isc_buffer_init(&xfr->buf, mem, len);
@@ -1279,6 +1288,74 @@ xfrout_ctx_create(isc_mem_t *mctx, ns_client_t *client, unsigned int id,
 	xfr->stream = stream;
 
 	*xfrp = xfr;
+}
+
+static void
+xfrout_send(xfrout_ctx_t *xfr) {
+	const bool is_tcp = ((xfr->client->attributes & NS_CLIENTATTR_TCP) !=
+			     0);
+
+	if (is_tcp) {
+		isc_region_t used;
+
+		isc_buffer_usedregion(&xfr->txbuf, &used);
+
+		isc_nmhandle_attach(xfr->client->handle,
+				    &xfr->client->sendhandle);
+		if (xfr->idletime > 0) {
+			isc_nmhandle_setwritetimeout(xfr->client->sendhandle,
+						     xfr->idletime);
+		}
+		isc_nm_send(xfr->client->sendhandle, &used, xfrout_senddone,
+			    xfr);
+		xfr->sends++;
+		xfr->cbytes = used.length;
+	} else {
+		ns_client_send(xfr->client);
+		xfr->stream->methods->pause(xfr->stream);
+		isc_nmhandle_detach(&xfr->client->reqhandle);
+		xfrout_ctx_destroy(&xfr);
+	}
+}
+
+static void
+xfrout_delayed_timeout(void *arg, isc_result_t result) {
+	xfrout_ctx_t *xfr = (xfrout_ctx_t *)arg;
+	UNUSED(result);
+
+	isc_nm_timer_stop(xfr->delayed_send_timer);
+	xfrout_send(xfr);
+}
+
+static void
+xfrout_enqueue_send(xfrout_ctx_t *xfr) {
+	uint64_t timeout = 0;
+
+	/*
+	 * System test helper options to simulate network issues.
+	 *
+	 * Both "transferslowly" and "transferstuck" are not meant to be
+	 * used together (and are not actually used this way).
+	 */
+	if (ns_server_getoption(xfr->client->manager->sctx,
+				NS_SERVER_TRANSFERSLOWLY))
+	{
+		/* Sleep for a bit over a second. */
+		timeout = 1000;
+	} else if (ns_server_getoption(xfr->client->manager->sctx,
+				       NS_SERVER_TRANSFERSTUCK))
+	{
+		/* Sleep for a bit over a minute. */
+		timeout = 60 * 1000;
+	}
+
+	if (timeout == 0) {
+		xfrout_send(xfr);
+		return;
+	}
+
+	/* delay */
+	isc_nm_timer_start(xfr->delayed_send_timer, timeout);
 }
 
 /*
@@ -1324,8 +1401,8 @@ sendstream(xfrout_ctx_t *xfr) {
 		 * message.
 		 */
 
-		dns_message_create(xfr->mctx, DNS_MESSAGE_INTENTRENDER,
-				   &tcpmsg);
+		dns_message_create(xfr->mctx, NULL, NULL,
+				   DNS_MESSAGE_INTENTRENDER, &tcpmsg);
 		msg = tcpmsg;
 
 		msg->id = xfr->id;
@@ -1519,7 +1596,6 @@ sendstream(xfrout_ctx_t *xfr) {
 	}
 
 	if (is_tcp) {
-		isc_region_t used;
 		dns_compress_init(&cctx, xfr->mctx,
 				  DNS_COMPRESS_CASE | DNS_COMPRESS_LARGE);
 		cleanup_cctx = true;
@@ -1530,60 +1606,15 @@ sendstream(xfrout_ctx_t *xfr) {
 		dns_compress_invalidate(&cctx);
 		cleanup_cctx = false;
 
-		isc_buffer_usedregion(&xfr->txbuf, &used);
-
 		xfrout_log(xfr, ISC_LOG_DEBUG(8),
-			   "sending TCP message of %d bytes", used.length);
+			   "sending TCP message of %d bytes",
+			   isc_buffer_usedlength(&xfr->txbuf));
 
-		/* System test helper options to simulate network issues. */
-		if (ns_server_getoption(xfr->client->manager->sctx,
-					NS_SERVER_TRANSFERSLOWLY))
-		{
-			/* Sleep for a bit over a second. */
-			select(0, NULL, NULL, NULL,
-			       &(struct timeval){ 1, 1000 });
-		}
-		if (ns_server_getoption(xfr->client->manager->sctx,
-					NS_SERVER_TRANSFERSTUCK))
-		{
-			/* Sleep for a bit over a minute. */
-			select(0, NULL, NULL, NULL,
-			       &(struct timeval){ 60, 1000 });
-		}
-
-		isc_nmhandle_attach(xfr->client->handle,
-				    &xfr->client->sendhandle);
-		if (xfr->idletime > 0) {
-			isc_nmhandle_setwritetimeout(xfr->client->sendhandle,
-						     xfr->idletime);
-		}
-		isc_nm_send(xfr->client->sendhandle, &used, xfrout_senddone,
-			    xfr);
-		xfr->sends++;
-		xfr->cbytes = used.length;
+		xfrout_enqueue_send(xfr);
 	} else {
 		xfrout_log(xfr, ISC_LOG_DEBUG(8), "sending IXFR UDP response");
 
-		/* System test helper options to simulate network issues. */
-		if (ns_server_getoption(xfr->client->manager->sctx,
-					NS_SERVER_TRANSFERSLOWLY))
-		{
-			/* Sleep for a bit over a second. */
-			select(0, NULL, NULL, NULL,
-			       &(struct timeval){ 1, 1000 });
-		}
-		if (ns_server_getoption(xfr->client->manager->sctx,
-					NS_SERVER_TRANSFERSTUCK))
-		{
-			/* Sleep for a bit over a minute. */
-			select(0, NULL, NULL, NULL,
-			       &(struct timeval){ 60, 1000 });
-		}
-
-		ns_client_send(xfr->client);
-		xfr->stream->methods->pause(xfr->stream);
-		isc_nmhandle_detach(&xfr->client->reqhandle);
-		xfrout_ctx_destroy(&xfr);
+		xfrout_enqueue_send(xfr);
 		return;
 	}
 
@@ -1608,10 +1639,6 @@ failure:
 		return;
 	}
 
-	if (xfr->client->sendhandle != NULL) {
-		isc_nmhandle_detach(&xfr->client->sendhandle);
-	}
-
 	xfrout_fail(xfr, result, "sending zone data");
 }
 
@@ -1621,6 +1648,9 @@ xfrout_ctx_destroy(xfrout_ctx_t **xfrp) {
 	*xfrp = NULL;
 
 	INSIST(xfr->sends == 0);
+
+	isc_nm_timer_stop(xfr->delayed_send_timer);
+	isc_nm_timer_detach(&xfr->delayed_send_timer);
 
 	isc_nm_timer_stop(xfr->maxtime_timer);
 	isc_nm_timer_detach(&xfr->maxtime_timer);

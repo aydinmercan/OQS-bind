@@ -26,6 +26,8 @@ options {
 	querylog yes;
 	resolver-query-timeout 30000; # 30 seconds
 	dnssec-validation no;
+	disable-empty-zone 10.in-addr.arpa;
+	fetches-per-zone 40;
 };
 
 key rndc_key {
@@ -39,5 +41,10 @@ controls {
 
 zone "." {
 	type hint;
-	file "../../common/root.hint";
+	file "../../_common/root.hint";
+};
+
+zone "in-addr.arpa" {
+	type primary;
+	file "in-addr.arpa.db";
 };

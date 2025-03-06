@@ -23,12 +23,9 @@
 #include <isc/mutex.h>
 #include <isc/overflow.h>
 #include <isc/types.h>
+#include <isc/urcu.h>
 
 ISC_LANG_BEGINDECLS
-
-#define ISC_MEM_LOWATER 0
-#define ISC_MEM_HIWATER 1
-typedef void (*isc_mem_water_t)(void *, int);
 
 /*%
  * Define ISC_MEM_TRACKLINES=1 to turn on detailed tracing of memory
@@ -45,7 +42,8 @@ extern unsigned int isc_mem_defaultflags;
 #define ISC_MEM_DEBUGTRACE  0x00000001U
 #define ISC_MEM_DEBUGRECORD 0x00000002U
 #define ISC_MEM_DEBUGUSAGE  0x00000004U
-#define ISC_MEM_DEBUGALL    0x0000001FU
+#define ISC_MEM_DEBUGALL \
+	(ISC_MEM_DEBUGTRACE | ISC_MEM_DEBUGRECORD | ISC_MEM_DEBUGUSAGE)
 /*!<
  * The variable isc_mem_debugging holds a set of flags for
  * turning certain memory debugging options on or off at
@@ -61,8 +59,8 @@ extern unsigned int isc_mem_defaultflags;
  *	Crash if a free doesn't match an allocation.
  *
  * \li #ISC_MEM_DEBUGUSAGE
- *	If a hi_water mark is set, print the maximum inuse memory
- *	every time it is raised once it exceeds the hi_water mark.
+ *	Every time the memory usage is greater (lower) than hi_water
+ *	(lo_water) mark, print the current inuse memory.
  */
 /*@}*/
 
@@ -186,7 +184,31 @@ extern unsigned int isc_mem_defaultflags;
 	} while (0)
 
 /*@{*/
+/*
+ * This is a little hack to help with dynamic link order,
+ * see https://github.com/jemalloc/jemalloc/issues/2566
+ * for more information.
+ */
+#if HAVE_JEMALLOC
+
+/*
+ * cmocka.h has confliction definitions with the jemalloc header but we only
+ * need the mallocx symbol from jemalloc.
+ */
+void *
+mallocx(size_t size, int flags);
+
+extern volatile void *isc__mem_malloc;
+
+#define isc_mem_create(cp)                                            \
+	{                                                             \
+		isc__mem_create((cp)_ISC_MEM_FILELINE);               \
+		isc__mem_malloc = mallocx;                            \
+		ISC_INSIST(CMM_ACCESS_ONCE(isc__mem_malloc) != NULL); \
+	}
+#else
 #define isc_mem_create(cp) isc__mem_create((cp)_ISC_MEM_FILELINE)
+#endif
 void
 isc__mem_create(isc_mem_t **_ISC_MEM_FLARG);
 
@@ -292,49 +314,20 @@ isc_mem_isovermem(isc_mem_t *mctx);
 void
 isc_mem_clearwater(isc_mem_t *mctx);
 void
-isc_mem_setwater(isc_mem_t *mctx, isc_mem_water_t water, void *water_arg,
-		 size_t hiwater, size_t lowater);
+isc_mem_setwater(isc_mem_t *mctx, size_t hiwater, size_t lowater);
 /*%<
  * Set high and low water marks for this memory context.
  *
- * When the memory usage of 'mctx' exceeds 'hiwater',
- * '(water)(water_arg, #ISC_MEM_HIWATER)' will be called.  'water' needs
- * to call isc_mem_waterack() with #ISC_MEM_HIWATER to acknowledge the
- * state change.  'water' may be called multiple times.
+ * When the memory usage of 'mctx' exceeds 'hiwater', the overmem condition
+ * will be met and isc_mem_isovermem() will return true.
  *
- * When the usage drops below 'lowater', 'water' will again be called,
- * this time with #ISC_MEM_LOWATER.  'water' need to calls
- * isc_mem_waterack() with #ISC_MEM_LOWATER to acknowledge the change.
+ * If the 'hiwater' and 'lowater' is set to 0, the high- and low-water
+ * processing are disabled for this memory context.
  *
- *	static void
- *	water(void *arg, int mark) {
- *		struct foo *foo = arg;
- *
- *		LOCK(&foo->marklock);
- *		if (foo->mark != mark) {
- *			foo->mark = mark;
- *			....
- *			isc_mem_waterack(foo->mctx, mark);
- *		}
- *		UNLOCK(&foo->marklock);
- *	}
- *
- * if 'water' is set to NULL, the 'hiwater' and 'lowater' must set to 0, and
- * high- and low-water processing are disabled for this memory context.  There's
- * a convenient function isc_mem_clearwater().
+ * There's a convenient function isc_mem_clearwater().
  *
  * Requires:
- *
- *\li   If 'water' is NULL, 'hiwater' and 'lowater' must be set to 0.
- *\li	If 'water' and 'water_arg' have previously been set, they are
-	unchanged.
  *\li	'hiwater' >= 'lowater'
- */
-
-void
-isc_mem_waterack(isc_mem_t *ctx, int mark);
-/*%<
- * Called to acknowledge changes in signaled by calls to 'water'.
  */
 
 void

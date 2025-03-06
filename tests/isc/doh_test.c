@@ -103,10 +103,14 @@ static atomic_bool check_listener_quota = false;
 
 static isc_nm_http_endpoints_t *endpoints = NULL;
 
+static atomic_bool use_PROXY = false;
+static atomic_bool use_PROXY_over_TLS = false;
+
 static isc_nm_t **nm = NULL;
 
 /* Timeout for soft-timeout tests (0.05 seconds) */
-#define T_SOFT 50
+#define T_SOFT	  50
+#define T_CONNECT 30 * 1000
 
 #define NSENDS	100
 #define NWRITES 10
@@ -130,6 +134,32 @@ static isc_nm_t **nm = NULL;
 #else
 #define X(v)
 #endif
+
+static isc_nm_proxy_type_t
+get_proxy_type(void) {
+	if (!atomic_load(&use_PROXY)) {
+		return ISC_NM_PROXY_NONE;
+	} else if (atomic_load(&use_TLS) && atomic_load(&use_PROXY_over_TLS)) {
+		return ISC_NM_PROXY_ENCRYPTED;
+	}
+
+	return ISC_NM_PROXY_PLAIN;
+}
+
+static void
+proxy_verify_unspec_endpoint(isc_nmhandle_t *handle) {
+	isc_sockaddr_t real_local, real_peer, local, peer;
+
+	if (isc_nm_is_proxy_unspec(handle)) {
+		peer = isc_nmhandle_peeraddr(handle);
+		local = isc_nmhandle_localaddr(handle);
+		real_peer = isc_nmhandle_real_peeraddr(handle);
+		real_local = isc_nmhandle_real_localaddr(handle);
+
+		assert_true(isc_sockaddr_equal(&peer, &real_peer));
+		assert_true(isc_sockaddr_equal(&local, &real_local));
+	}
+}
 
 typedef struct csdata {
 	isc_mem_t *mctx;
@@ -183,8 +213,8 @@ connect_send_request(isc_nm_t *mgr, const char *uri, bool post,
 	}
 
 	isc_nm_httpconnect(mgr, NULL, &tcp_listen_addr, uri, post,
-			   connect_send_cb, data, ctx, client_sess_cache,
-			   timeout);
+			   connect_send_cb, data, ctx, NULL, client_sess_cache,
+			   timeout, get_proxy_type(), NULL);
 }
 
 static int
@@ -199,7 +229,7 @@ setup_ephemeral_port(isc_sockaddr_t *addr, sa_family_t family) {
 	fd = socket(AF_INET6, family, 0);
 	if (fd < 0) {
 		perror("setup_ephemeral_port: socket()");
-		return (-1);
+		return -1;
 	}
 
 	r = bind(fd, (const struct sockaddr *)&addr->type.sa,
@@ -207,23 +237,23 @@ setup_ephemeral_port(isc_sockaddr_t *addr, sa_family_t family) {
 	if (r != 0) {
 		perror("setup_ephemeral_port: bind()");
 		isc__nm_closesocket(fd);
-		return (r);
+		return r;
 	}
 
 	r = getsockname(fd, (struct sockaddr *)&addr->type.sa, &addrlen);
 	if (r != 0) {
 		perror("setup_ephemeral_port: getsockname()");
 		isc__nm_closesocket(fd);
-		return (r);
+		return r;
 	}
 
-	result = isc__nm_socket_reuse(fd);
+	result = isc__nm_socket_reuse(fd, 1);
 	if (result != ISC_R_SUCCESS && result != ISC_R_NOTIMPLEMENTED) {
 		fprintf(stderr,
 			"setup_ephemeral_port: isc__nm_socket_reuse(): %s",
 			isc_result_totext(result));
 		close(fd);
-		return (-1);
+		return -1;
 	}
 
 	result = isc__nm_socket_reuse_lb(fd);
@@ -232,7 +262,7 @@ setup_ephemeral_port(isc_sockaddr_t *addr, sa_family_t family) {
 			"setup_ephemeral_port: isc__nm_socket_reuse_lb(): %s",
 			isc_result_totext(result));
 		close(fd);
-		return (-1);
+		return -1;
 	}
 
 #if IPV6_RECVERR
@@ -243,11 +273,11 @@ setup_ephemeral_port(isc_sockaddr_t *addr, sa_family_t family) {
 	if (r != 0) {
 		perror("setup_ephemeral_port");
 		close(fd);
-		return (r);
+		return r;
 	}
 #endif
 
-	return (fd);
+	return fd;
 }
 
 /* Generic */
@@ -272,7 +302,7 @@ setup_test(void **state) {
 	tcp_listen_addr = (isc_sockaddr_t){ .length = 0 };
 	tcp_listen_sock = setup_ephemeral_port(&tcp_listen_addr, SOCK_STREAM);
 	if (tcp_listen_sock < 0) {
-		return (-1);
+		return -1;
 	}
 	close(tcp_listen_sock);
 	tcp_listen_sock = -1;
@@ -303,13 +333,15 @@ setup_test(void **state) {
 
 	atomic_store(&POST, false);
 	atomic_store(&use_TLS, false);
+	atomic_store(&use_PROXY, false);
+	atomic_store(&use_PROXY_over_TLS, false);
 
 	noanswer = false;
 
 	isc_nonce_buf(&send_magic, sizeof(send_magic));
 	isc_nonce_buf(&stop_magic, sizeof(stop_magic));
 	if (send_magic == stop_magic) {
-		return (-1);
+		return -1;
 	}
 
 	setup_loopmgr(state);
@@ -339,7 +371,7 @@ setup_test(void **state) {
 
 	*state = nm;
 
-	return (0);
+	return 0;
 }
 
 static int
@@ -365,7 +397,7 @@ teardown_test(void **state ISC_ATTR_UNUSED) {
 
 	isc_nm_http_endpoints_detach(&endpoints);
 
-	return (0);
+	return 0;
 }
 
 thread_local size_t nwrites = NWRITES;
@@ -384,7 +416,7 @@ init_listener_quota(size_t nthreads) {
 		isc_quota_max(&listener_quota, max_quota);
 		quotap = &listener_quota;
 	}
-	return (quotap);
+	return quotap;
 }
 
 static void
@@ -395,6 +427,9 @@ doh_receive_reply_cb(isc_nmhandle_t *handle, isc_result_t eresult,
 	UNUSED(region);
 
 	if (eresult == ISC_R_SUCCESS) {
+		if (atomic_load(&use_PROXY)) {
+			assert_true(isc_nm_is_proxy_handle(handle));
+		}
 		(void)atomic_fetch_sub(&nsends, 1);
 		if (have_expected_csends(atomic_fetch_add(&csends, 1) + 1) ||
 		    have_expected_creads(atomic_fetch_add(&creads, 1) + 1))
@@ -428,6 +463,11 @@ doh_receive_request_cb(isc_nmhandle_t *handle, isc_result_t eresult,
 
 	if (eresult != ISC_R_SUCCESS) {
 		return;
+	}
+
+	if (atomic_load(&use_PROXY)) {
+		assert_true(isc_nm_is_proxy_handle(handle));
+		proxy_verify_unspec_endpoint(handle);
 	}
 
 	atomic_fetch_add(&sreads, 1);
@@ -472,7 +512,7 @@ ISC_LOOP_TEST_IMPL(mock_doh_uv_tcp_bind) {
 	assert_int_equal(result, ISC_R_SUCCESS);
 	result = isc_nm_listenhttp(listen_nm, ISC_NM_LISTEN_ALL,
 				   &tcp_listen_addr, 0, NULL, NULL, endpoints,
-				   0, &listen_sock);
+				   0, false, &listen_sock);
 	assert_int_not_equal(result, ISC_R_SUCCESS);
 	assert_null(listen_sock);
 
@@ -504,7 +544,7 @@ doh_noop(void *arg ISC_ATTR_UNUSED) {
 
 	result = isc_nm_listenhttp(listen_nm, ISC_NM_LISTEN_ALL,
 				   &tcp_listen_addr, 0, NULL, NULL, endpoints,
-				   0, &listen_sock);
+				   0, get_proxy_type(), &listen_sock);
 	assert_int_equal(result, ISC_R_SUCCESS);
 	isc_loop_teardown(mainloop, listen_sock_close, listen_sock);
 
@@ -547,7 +587,7 @@ doh_noresponse(void *arg ISC_ATTR_UNUSED) {
 
 	result = isc_nm_listenhttp(listen_nm, ISC_NM_LISTEN_ALL,
 				   &tcp_listen_addr, 0, NULL, NULL, endpoints,
-				   0, &listen_sock);
+				   0, get_proxy_type(), &listen_sock);
 	assert_int_equal(result, ISC_R_SUCCESS);
 	isc_loop_teardown(mainloop, listen_sock_close, listen_sock);
 
@@ -639,7 +679,7 @@ doh_timeout_recovery(void *arg ISC_ATTR_UNUSED) {
 
 	result = isc_nm_listenhttp(listen_nm, ISC_NM_LISTEN_ALL,
 				   &tcp_listen_addr, 0, NULL, NULL, endpoints,
-				   0, &listen_sock);
+				   0, get_proxy_type(), &listen_sock);
 	assert_int_equal(result, ISC_R_SUCCESS);
 	isc_loop_teardown(mainloop, listen_sock_close, listen_sock);
 
@@ -658,13 +698,14 @@ doh_timeout_recovery(void *arg ISC_ATTR_UNUSED) {
 			ISC_NM_HTTP_DEFAULT_PATH);
 	isc_nm_httpconnect(connect_nm, NULL, &tcp_listen_addr, req_url,
 			   atomic_load(&POST), timeout_request_cb, NULL, ctx,
-			   client_sess_cache, T_SOFT);
+			   NULL, client_sess_cache, T_CONNECT, get_proxy_type(),
+			   NULL);
 }
 
 static int
 doh_timeout_recovery_teardown(void **state) {
 	assert_true(atomic_load(&ctimeouts) == 5);
-	return (teardown_test(state));
+	return teardown_test(state);
 }
 
 ISC_LOOP_TEST_IMPL(doh_timeout_recovery_POST) {
@@ -710,7 +751,7 @@ doh_receive_send_reply_cb(isc_nmhandle_t *handle, isc_result_t eresult,
 			assert_true(eresult == ISC_R_SUCCESS);
 		}
 
-		isc_async_current(loopmgr, doh_connect_thread, connect_nm);
+		isc_async_current(doh_connect_thread, connect_nm);
 	}
 	if (sends <= 0) {
 		isc_loopmgr_shutdown(loopmgr);
@@ -732,7 +773,8 @@ doh_connect_thread(void *arg) {
 	 */
 	int_fast64_t active = atomic_fetch_add(&active_cconnects, 1);
 	if (active > workers) {
-		goto next;
+		atomic_fetch_sub(&active_cconnects, 1);
+		return;
 	}
 	connect_send_request(connect_nm, req_url, atomic_load(&POST),
 			     &(isc_region_t){ .base = (uint8_t *)send_msg.base,
@@ -743,8 +785,6 @@ doh_connect_thread(void *arg) {
 	if (sends <= 0) {
 		isc_loopmgr_shutdown(loopmgr);
 	}
-
-next: {}
 }
 
 static void
@@ -765,10 +805,10 @@ doh_recv_one(void *arg ISC_ATTR_UNUSED) {
 					   doh_receive_request_cb, NULL);
 	assert_int_equal(result, ISC_R_SUCCESS);
 
-	result = isc_nm_listenhttp(listen_nm, ISC_NM_LISTEN_ALL,
-				   &tcp_listen_addr, 0, quotap,
-				   atomic_load(&use_TLS) ? server_tlsctx : NULL,
-				   endpoints, 0, &listen_sock);
+	result = isc_nm_listenhttp(
+		listen_nm, ISC_NM_LISTEN_ALL, &tcp_listen_addr, 0, quotap,
+		atomic_load(&use_TLS) ? server_tlsctx : NULL, endpoints, 0,
+		get_proxy_type(), &listen_sock);
 	assert_int_equal(result, ISC_R_SUCCESS);
 
 	sockaddr_to_url(&tcp_listen_addr, atomic_load(&use_TLS), req_url,
@@ -795,7 +835,7 @@ doh_recv_one_teardown(void **state) {
 	assert_int_equal(atomic_load(&sreads), 1);
 	assert_int_equal(atomic_load(&ssends), 1);
 
-	return (teardown_test(state));
+	return teardown_test(state);
 }
 
 ISC_LOOP_TEST_IMPL(doh_recv_one_POST) {
@@ -892,10 +932,10 @@ doh_recv_two(void *arg ISC_ATTR_UNUSED) {
 					   doh_receive_request_cb, NULL);
 	assert_int_equal(result, ISC_R_SUCCESS);
 
-	result = isc_nm_listenhttp(listen_nm, ISC_NM_LISTEN_ALL,
-				   &tcp_listen_addr, 0, quotap,
-				   atomic_load(&use_TLS) ? server_tlsctx : NULL,
-				   endpoints, 0, &listen_sock);
+	result = isc_nm_listenhttp(
+		listen_nm, ISC_NM_LISTEN_ALL, &tcp_listen_addr, 0, quotap,
+		atomic_load(&use_TLS) ? server_tlsctx : NULL, endpoints, 0,
+		get_proxy_type(), &listen_sock);
 	assert_int_equal(result, ISC_R_SUCCESS);
 
 	sockaddr_to_url(&tcp_listen_addr, atomic_load(&use_TLS), req_url,
@@ -907,7 +947,8 @@ doh_recv_two(void *arg ISC_ATTR_UNUSED) {
 
 	isc_nm_httpconnect(connect_nm, NULL, &tcp_listen_addr, req_url,
 			   atomic_load(&POST), doh_connect_send_two_requests_cb,
-			   NULL, ctx, client_sess_cache, 5000);
+			   NULL, ctx, NULL, client_sess_cache, 5000,
+			   get_proxy_type(), NULL);
 
 	isc_loop_teardown(mainloop, listen_sock_close, listen_sock);
 }
@@ -925,7 +966,7 @@ doh_recv_two_teardown(void **state) {
 	assert_int_equal(atomic_load(&sreads), 2);
 	assert_int_equal(atomic_load(&ssends), 2);
 
-	return (teardown_test(state));
+	return teardown_test(state);
 }
 
 ISC_LOOP_TEST_IMPL(doh_recv_two_POST) {
@@ -992,10 +1033,10 @@ doh_recv_send(void *arg ISC_ATTR_UNUSED) {
 					   doh_receive_request_cb, NULL);
 	assert_int_equal(result, ISC_R_SUCCESS);
 
-	result = isc_nm_listenhttp(listen_nm, ISC_NM_LISTEN_ALL,
-				   &tcp_listen_addr, 0, quotap,
-				   atomic_load(&use_TLS) ? server_tlsctx : NULL,
-				   endpoints, 0, &listen_sock);
+	result = isc_nm_listenhttp(
+		listen_nm, ISC_NM_LISTEN_ALL, &tcp_listen_addr, 0, quotap,
+		atomic_load(&use_TLS) ? server_tlsctx : NULL, endpoints, 0,
+		get_proxy_type(), &listen_sock);
 	assert_int_equal(result, ISC_R_SUCCESS);
 
 	for (size_t i = 0; i < nthreads; i++) {
@@ -1021,7 +1062,7 @@ doh_recv_send_teardown(void **state) {
 	CHECK_RANGE_FULL(sreads);
 	CHECK_RANGE_FULL(ssends);
 
-	return (res);
+	return res;
 }
 
 ISC_LOOP_TEST_IMPL(doh_recv_send_POST) {
@@ -1086,7 +1127,7 @@ doh_bad_connect_uri_teardown(void **state) {
 	assert_int_equal(atomic_load(&sreads), 0);
 	assert_int_equal(atomic_load(&ssends), 0);
 
-	return (teardown_test(state));
+	return teardown_test(state);
 }
 
 /* See: GL #2858, !5319 */
@@ -1106,9 +1147,9 @@ ISC_LOOP_TEST_IMPL(doh_bad_connect_uri) {
 					   doh_receive_request_cb, NULL);
 	assert_int_equal(result, ISC_R_SUCCESS);
 
-	result = isc_nm_listenhttp(listen_nm, ISC_NM_LISTEN_ALL,
-				   &tcp_listen_addr, 0, quotap, server_tlsctx,
-				   endpoints, 0, &listen_sock);
+	result = isc_nm_listenhttp(
+		listen_nm, ISC_NM_LISTEN_ALL, &tcp_listen_addr, 0, quotap,
+		server_tlsctx, endpoints, 0, get_proxy_type(), &listen_sock);
 	assert_int_equal(result, ISC_R_SUCCESS);
 
 	/*
@@ -1775,6 +1816,295 @@ ISC_RUN_TEST_IMPL(doh_connect_makeuri) {
 	assert_true(strcmp("https://[::1]:44343/dns-query", uri) == 0);
 }
 
+/* PROXY */
+ISC_LOOP_TEST_IMPL(proxy_doh_noop_POST) {
+	atomic_store(&POST, true);
+	atomic_store(&use_PROXY, true);
+	doh_noop(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_noop_GET) {
+	atomic_store(&use_PROXY, true);
+	doh_noop(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_noresponse_POST) {
+	atomic_store(&POST, true);
+	atomic_store(&use_PROXY, true);
+	doh_noresponse(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_noresponse_GET) {
+	atomic_store(&use_PROXY, true);
+	doh_noresponse(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_timeout_recovery_POST) {
+	atomic_store(&POST, true);
+	atomic_store(&use_PROXY, true);
+	doh_timeout_recovery(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_timeout_recovery_GET) {
+	atomic_store(&use_PROXY, true);
+	doh_timeout_recovery(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_recv_one_POST) {
+	atomic_store(&POST, true);
+	atomic_store(&use_PROXY, true);
+	doh_recv_one(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_recv_one_GET) {
+	atomic_store(&use_PROXY, true);
+	doh_recv_one(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_recv_one_POST_TLS) {
+	atomic_store(&POST, true);
+	atomic_store(&use_TLS, true);
+	atomic_store(&use_PROXY, true);
+	doh_recv_one(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_recv_one_GET_TLS) {
+	atomic_store(&use_TLS, true);
+	atomic_store(&use_PROXY, true);
+	doh_recv_one(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_recv_one_POST_quota) {
+	atomic_store(&POST, true);
+	atomic_store(&use_PROXY, true);
+	atomic_store(&check_listener_quota, true);
+	doh_recv_one(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_recv_one_GET_quota) {
+	atomic_store(&use_PROXY, true);
+	atomic_store(&check_listener_quota, true);
+	doh_recv_one(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_recv_one_GET_TLS_quota) {
+	atomic_store(&use_TLS, true);
+	atomic_store(&use_PROXY, true);
+	atomic_store(&check_listener_quota, true);
+	doh_recv_one(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_recv_one_POST_TLS_quota) {
+	atomic_store(&POST, true);
+	atomic_store(&use_TLS, true);
+	atomic_store(&use_PROXY, true);
+	atomic_store(&check_listener_quota, true);
+	doh_recv_one(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_recv_two_POST) {
+	atomic_store(&POST, true);
+	atomic_store(&use_PROXY, true);
+	doh_recv_two(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_recv_two_GET) {
+	;
+	atomic_store(&use_PROXY, true);
+	doh_recv_two(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_recv_two_POST_TLS) {
+	atomic_store(&POST, true);
+	atomic_store(&use_TLS, true);
+	atomic_store(&use_PROXY, true);
+	doh_recv_two(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_recv_two_GET_TLS) {
+	atomic_store(&use_TLS, true);
+	atomic_store(&use_PROXY, true);
+	doh_recv_two(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_recv_two_POST_quota) {
+	atomic_store(&POST, true);
+	atomic_store(&use_PROXY, true);
+	atomic_store(&check_listener_quota, true);
+	doh_recv_two(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_recv_two_GET_quota) {
+	atomic_store(&use_PROXY, true);
+	atomic_store(&check_listener_quota, true);
+	doh_recv_two(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_recv_two_POST_TLS_quota) {
+	atomic_store(&POST, true);
+	atomic_store(&use_TLS, true);
+	atomic_store(&use_PROXY, true);
+	atomic_store(&check_listener_quota, true);
+	doh_recv_two(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_recv_two_GET_TLS_quota) {
+	atomic_store(&use_TLS, true);
+	atomic_store(&use_PROXY, true);
+	atomic_store(&check_listener_quota, true);
+	doh_recv_two(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_recv_send_POST) {
+	atomic_store(&POST, true);
+	atomic_store(&use_PROXY, true);
+	doh_recv_send(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_recv_send_GET) {
+	atomic_store(&use_PROXY, true);
+	doh_recv_send(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_recv_send_POST_TLS) {
+	atomic_store(&POST, true);
+	atomic_store(&use_TLS, true);
+	atomic_store(&use_PROXY, true);
+	doh_recv_send(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_recv_send_GET_TLS) {
+	atomic_store(&use_TLS, true);
+	atomic_store(&use_PROXY, true);
+	doh_recv_send(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_recv_send_POST_quota) {
+	atomic_store(&POST, true);
+	atomic_store(&use_PROXY, true);
+	atomic_store(&check_listener_quota, true);
+	doh_recv_send(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_recv_send_GET_quota) {
+	atomic_store(&use_PROXY, true);
+	atomic_store(&check_listener_quota, true);
+	doh_recv_send(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_recv_send_POST_TLS_quota) {
+	atomic_store(&POST, true);
+	atomic_store(&use_TLS, true);
+	atomic_store(&use_PROXY, true);
+	atomic_store(&check_listener_quota, true);
+	doh_recv_send(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxy_doh_recv_send_GET_TLS_quota) {
+	atomic_store(&use_TLS, true);
+	atomic_store(&use_PROXY, true);
+	atomic_store(&check_listener_quota, true);
+	doh_recv_send(arg);
+}
+
+/* PROXY over TLS */
+
+ISC_LOOP_TEST_IMPL(proxytls_doh_recv_one_POST_TLS) {
+	atomic_store(&POST, true);
+	atomic_store(&use_TLS, true);
+	atomic_store(&use_PROXY, true);
+	atomic_store(&use_PROXY_over_TLS, true);
+	doh_recv_one(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxytls_doh_recv_one_GET_TLS) {
+	atomic_store(&use_TLS, true);
+	atomic_store(&use_PROXY, true);
+	atomic_store(&use_PROXY_over_TLS, true);
+	doh_recv_one(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxytls_doh_recv_one_GET_TLS_quota) {
+	atomic_store(&use_TLS, true);
+	atomic_store(&use_PROXY, true);
+	atomic_store(&use_PROXY_over_TLS, true);
+	atomic_store(&check_listener_quota, true);
+	doh_recv_one(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxytls_doh_recv_one_POST_TLS_quota) {
+	atomic_store(&POST, true);
+	atomic_store(&use_TLS, true);
+	atomic_store(&use_PROXY, true);
+	atomic_store(&use_PROXY_over_TLS, true);
+	atomic_store(&check_listener_quota, true);
+	doh_recv_one(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxytls_doh_recv_two_POST_TLS) {
+	atomic_store(&POST, true);
+	atomic_store(&use_TLS, true);
+	atomic_store(&use_PROXY, true);
+	atomic_store(&use_PROXY_over_TLS, true);
+	doh_recv_two(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxytls_doh_recv_two_GET_TLS) {
+	atomic_store(&use_TLS, true);
+	atomic_store(&use_PROXY, true);
+	atomic_store(&use_PROXY_over_TLS, true);
+	doh_recv_two(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxytls_doh_recv_two_POST_TLS_quota) {
+	atomic_store(&POST, true);
+	atomic_store(&use_TLS, true);
+	atomic_store(&use_PROXY, true);
+	atomic_store(&use_PROXY_over_TLS, true);
+	atomic_store(&check_listener_quota, true);
+	doh_recv_two(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxytls_doh_recv_two_GET_TLS_quota) {
+	atomic_store(&use_TLS, true);
+	atomic_store(&use_PROXY, true);
+	atomic_store(&use_PROXY_over_TLS, true);
+	atomic_store(&check_listener_quota, true);
+	doh_recv_two(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxytls_doh_recv_send_POST_TLS) {
+	atomic_store(&POST, true);
+	atomic_store(&use_TLS, true);
+	atomic_store(&use_PROXY, true);
+	atomic_store(&use_PROXY_over_TLS, true);
+	doh_recv_send(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxytls_doh_recv_send_GET_TLS) {
+	atomic_store(&use_TLS, true);
+	atomic_store(&use_PROXY, true);
+	atomic_store(&use_PROXY_over_TLS, true);
+	doh_recv_send(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxytls_doh_recv_send_POST_TLS_quota) {
+	atomic_store(&POST, true);
+	atomic_store(&use_TLS, true);
+	atomic_store(&use_PROXY, true);
+	atomic_store(&use_PROXY_over_TLS, true);
+	atomic_store(&check_listener_quota, true);
+	doh_recv_send(arg);
+}
+
+ISC_LOOP_TEST_IMPL(proxytls_doh_recv_send_GET_TLS_quota) {
+	atomic_store(&use_TLS, true);
+	atomic_store(&use_PROXY, true);
+	atomic_store(&use_PROXY_over_TLS, true);
+	atomic_store(&check_listener_quota, true);
+	doh_recv_send(arg);
+}
+
 ISC_TEST_LIST_START
 
 ISC_TEST_ENTRY_CUSTOM(mock_doh_uv_tcp_bind, setup_test, teardown_test)
@@ -1828,6 +2158,86 @@ ISC_TEST_ENTRY_CUSTOM(doh_recv_send_POST_TLS_quota, setup_test,
 		      doh_recv_send_teardown)
 ISC_TEST_ENTRY_CUSTOM(doh_bad_connect_uri, setup_test,
 		      doh_bad_connect_uri_teardown)
+/* PROXY */
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_noop_POST, setup_test, teardown_test)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_noop_GET, setup_test, teardown_test)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_noresponse_POST, setup_test, teardown_test)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_noresponse_GET, setup_test, teardown_test)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_timeout_recovery_POST, setup_test,
+		      doh_timeout_recovery_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_timeout_recovery_GET, setup_test,
+		      doh_timeout_recovery_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_recv_one_POST, setup_test,
+		      doh_recv_one_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_recv_one_GET, setup_test, doh_recv_one_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_recv_one_POST_TLS, setup_test,
+		      doh_recv_one_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_recv_one_GET_TLS, setup_test,
+		      doh_recv_one_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_recv_one_POST_quota, setup_test,
+		      doh_recv_one_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_recv_one_GET_quota, setup_test,
+		      doh_recv_one_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_recv_one_POST_TLS_quota, setup_test,
+		      doh_recv_one_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_recv_one_GET_TLS_quota, setup_test,
+		      doh_recv_one_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_recv_two_POST, setup_test,
+		      doh_recv_two_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_recv_two_GET, setup_test, doh_recv_two_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_recv_two_POST_TLS, setup_test,
+		      doh_recv_two_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_recv_two_GET_TLS, setup_test,
+		      doh_recv_two_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_recv_two_POST_quota, setup_test,
+		      doh_recv_two_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_recv_two_GET_quota, setup_test,
+		      doh_recv_two_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_recv_two_POST_TLS_quota, setup_test,
+		      doh_recv_two_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_recv_two_GET_TLS_quota, setup_test,
+		      doh_recv_two_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_recv_send_GET, setup_test,
+		      doh_recv_send_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_recv_send_POST, setup_test,
+		      doh_recv_send_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_recv_send_GET_TLS, setup_test,
+		      doh_recv_send_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_recv_send_POST_TLS, setup_test,
+		      doh_recv_send_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_recv_send_GET_quota, setup_test,
+		      doh_recv_send_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_recv_send_POST_quota, setup_test,
+		      doh_recv_send_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_recv_send_GET_TLS_quota, setup_test,
+		      doh_recv_send_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxy_doh_recv_send_POST_TLS_quota, setup_test,
+		      doh_recv_send_teardown)
+/* PROXY over TLS */
+ISC_TEST_ENTRY_CUSTOM(proxytls_doh_recv_one_POST_TLS, setup_test,
+		      doh_recv_one_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxytls_doh_recv_one_GET_TLS, setup_test,
+		      doh_recv_one_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxytls_doh_recv_one_POST_TLS_quota, setup_test,
+		      doh_recv_one_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxytls_doh_recv_one_GET_TLS_quota, setup_test,
+		      doh_recv_one_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxytls_doh_recv_two_POST_TLS, setup_test,
+		      doh_recv_two_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxytls_doh_recv_two_GET_TLS, setup_test,
+		      doh_recv_two_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxytls_doh_recv_two_POST_TLS_quota, setup_test,
+		      doh_recv_two_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxytls_doh_recv_two_GET_TLS_quota, setup_test,
+		      doh_recv_two_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxytls_doh_recv_send_GET_TLS, setup_test,
+		      doh_recv_send_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxytls_doh_recv_send_POST_TLS, setup_test,
+		      doh_recv_send_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxytls_doh_recv_send_GET_TLS_quota, setup_test,
+		      doh_recv_send_teardown)
+ISC_TEST_ENTRY_CUSTOM(proxytls_doh_recv_send_POST_TLS_quota, setup_test,
+		      doh_recv_send_teardown)
 ISC_TEST_LIST_END
 
 ISC_TEST_MAIN

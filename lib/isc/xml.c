@@ -23,17 +23,17 @@ static isc_mem_t *isc__xml_mctx = NULL;
 
 static void *
 isc__xml_malloc(size_t size) {
-	return (isc_mem_allocate(isc__xml_mctx, size));
+	return isc_mem_allocate(isc__xml_mctx, size);
 }
 
 static void *
 isc__xml_realloc(void *ptr, size_t size) {
-	return (isc_mem_reallocate(isc__xml_mctx, ptr, size));
+	return isc_mem_reallocate(isc__xml_mctx, ptr, size);
 }
 
 static char *
 isc__xml_strdup(const char *str) {
-	return (isc_mem_strdup(isc__xml_mctx, str));
+	return isc_mem_strdup(isc__xml_mctx, str);
 }
 
 static void
@@ -53,9 +53,8 @@ isc__xml_initialize(void) {
 	isc_mem_setname(isc__xml_mctx, "libxml2");
 	isc_mem_setdestroycheck(isc__xml_mctx, false);
 
-	RUNTIME_CHECK(xmlGcMemSetup(isc__xml_free, isc__xml_malloc,
-				    isc__xml_malloc, isc__xml_realloc,
-				    isc__xml_strdup) == 0);
+	RUNTIME_CHECK(xmlMemSetup(isc__xml_free, isc__xml_malloc,
+				  isc__xml_realloc, isc__xml_strdup) == 0);
 
 	xmlInitParser();
 #endif /* HAVE_LIBXML2 */

@@ -25,8 +25,7 @@
 #include <dns/qp.h>
 #include <dns/types.h>
 
-/* Define to 1 for detailed reference tracing */
-#undef DNS_FORWARD_TRACE
+/* Add -DDNS_FORWARD_TRACE=1 to CFLAGS for detailed reference tracing */
 
 ISC_LANG_BEGINDECLS
 
@@ -43,8 +42,7 @@ struct dns_forwarders {
 	dns_fwdpolicy_t	    fwdpolicy;
 	isc_mem_t	   *mctx;
 	isc_refcount_t	    references;
-	dns_fixedname_t	    fn;
-	dns_name_t	   *name;
+	dns_name_t	    name;
 };
 
 void

@@ -34,6 +34,9 @@
 #include <dns/rootns.h>
 #include <dns/view.h>
 
+/*
+ * Also update 'upcoming' when updating 'root_ns'.
+ */
 static char root_ns[] =
 	";\n"
 	"; Internet Root Nameservers\n"
@@ -54,8 +57,8 @@ static char root_ns[] =
 	".                       518400  IN      NS      M.ROOT-SERVERS.NET.\n"
 	"A.ROOT-SERVERS.NET.     3600000 IN      A       198.41.0.4\n"
 	"A.ROOT-SERVERS.NET.     3600000 IN      AAAA    2001:503:BA3E::2:30\n"
-	"B.ROOT-SERVERS.NET.     3600000 IN      A       199.9.14.201\n"
-	"B.ROOT-SERVERS.NET.     3600000 IN      AAAA    2001:500:200::b\n"
+	"B.ROOT-SERVERS.NET.     3600000 IN      A       170.247.170.2\n"
+	"B.ROOT-SERVERS.NET.     3600000 IN      AAAA    2801:1b8:10::b\n"
 	"C.ROOT-SERVERS.NET.     3600000 IN      A       192.33.4.12\n"
 	"C.ROOT-SERVERS.NET.     3600000 IN      AAAA    2001:500:2::c\n"
 	"D.ROOT-SERVERS.NET.     3600000 IN      A       199.7.91.13\n"
@@ -79,6 +82,24 @@ static char root_ns[] =
 	"M.ROOT-SERVERS.NET.     3600000 IN      A       202.12.27.33\n"
 	"M.ROOT-SERVERS.NET.     3600000 IN      AAAA    2001:DC3::35\n";
 
+static unsigned char b_data[] = "\001b\014root-servers\003net";
+static unsigned char b_offsets[] = { 0, 2, 15, 19 };
+
+static struct upcoming {
+	const dns_name_t name;
+	dns_rdatatype_t type;
+	isc_stdtime_t time;
+} upcoming[] = { {
+			 .name = DNS_NAME_INITABSOLUTE(b_data, b_offsets),
+			 .type = dns_rdatatype_a,
+			 .time = 1701086400 /* November 27 2023, 12:00 UTC */
+		 },
+		 {
+			 .name = DNS_NAME_INITABSOLUTE(b_data, b_offsets),
+			 .type = dns_rdatatype_aaaa,
+			 .time = 1701086400 /* November 27 2023, 12:00 UTC */
+		 } };
+
 static isc_result_t
 in_rootns(dns_rdataset_t *rootns, dns_name_t *name) {
 	isc_result_t result;
@@ -86,7 +107,7 @@ in_rootns(dns_rdataset_t *rootns, dns_name_t *name) {
 	dns_rdata_ns_t ns;
 
 	if (!dns_rdataset_isassociated(rootns)) {
-		return (ISC_R_NOTFOUND);
+		return ISC_R_NOTFOUND;
 	}
 
 	result = dns_rdataset_first(rootns);
@@ -94,10 +115,10 @@ in_rootns(dns_rdataset_t *rootns, dns_name_t *name) {
 		dns_rdataset_current(rootns, &rdata);
 		result = dns_rdata_tostruct(&rdata, &ns, NULL);
 		if (result != ISC_R_SUCCESS) {
-			return (result);
+			return result;
 		}
 		if (dns_name_compare(name, &ns.name) == 0) {
-			return (ISC_R_SUCCESS);
+			return ISC_R_SUCCESS;
 		}
 		result = dns_rdataset_next(rootns);
 		dns_rdata_reset(&rdata);
@@ -105,7 +126,7 @@ in_rootns(dns_rdataset_t *rootns, dns_name_t *name) {
 	if (result == ISC_R_NOMORE) {
 		result = ISC_R_NOTFOUND;
 	}
-	return (result);
+	return result;
 }
 
 static isc_result_t
@@ -145,7 +166,7 @@ cleanup:
 	if (dns_rdataset_isassociated(&rdataset)) {
 		dns_rdataset_disassociate(&rdataset);
 	}
-	return (result);
+	return result;
 }
 
 static isc_result_t
@@ -203,7 +224,7 @@ cleanup:
 	if (dbiter != NULL) {
 		dns_dbiterator_destroy(&dbiter);
 	}
-	return (result);
+	return result;
 }
 
 isc_result_t
@@ -217,8 +238,8 @@ dns_rootns_create(isc_mem_t *mctx, dns_rdataclass_t rdclass,
 
 	REQUIRE(target != NULL && *target == NULL);
 
-	result = dns_db_create(mctx, "rbt", dns_rootname, dns_dbtype_zone,
-			       rdclass, 0, NULL, &db);
+	result = dns_db_create(mctx, ZONEDB_DEFAULT, dns_rootname,
+			       dns_dbtype_zone, rdclass, 0, NULL, &db);
 	if (result != ISC_R_SUCCESS) {
 		goto failure;
 	}
@@ -264,7 +285,7 @@ dns_rootns_create(isc_mem_t *mctx, dns_rdataclass_t rdclass,
 			      (filename != NULL) ? filename : "<BUILT-IN>");
 	}
 	*target = db;
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 
 failure:
 	isc_log_write(dns_lctx, DNS_LOGCATEGORY_GENERAL, DNS_LOGMODULE_HINTS,
@@ -278,7 +299,7 @@ failure:
 		dns_db_detach(&db);
 	}
 
-	return (result);
+	return result;
 }
 
 static void
@@ -327,12 +348,24 @@ inrrset(dns_rdataset_t *rrset, dns_rdata_t *rdata) {
 	while (result == ISC_R_SUCCESS) {
 		dns_rdataset_current(rrset, &current);
 		if (dns_rdata_compare(rdata, &current) == 0) {
-			return (true);
+			return true;
 		}
 		dns_rdata_reset(&current);
 		result = dns_rdataset_next(rrset);
 	}
-	return (false);
+	return false;
+}
+
+static bool
+changing(const dns_name_t *name, dns_rdatatype_t type, isc_stdtime_t now) {
+	for (size_t i = 0; i < ARRAY_SIZE(upcoming); i++) {
+		if (upcoming[i].time > now && upcoming[i].type == type &&
+		    dns_name_equal(&upcoming[i].name, name))
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 /*
@@ -366,7 +399,9 @@ check_address_records(dns_view_t *view, dns_db_t *hints, dns_db_t *db,
 		while (result == ISC_R_SUCCESS) {
 			dns_rdata_reset(&rdata);
 			dns_rdataset_current(&rootrrset, &rdata);
-			if (!inrrset(&hintrrset, &rdata)) {
+			if (!inrrset(&hintrrset, &rdata) &&
+			    !changing(name, dns_rdatatype_a, now))
+			{
 				report(view, name, true, &rdata);
 			}
 			result = dns_rdataset_next(&rootrrset);
@@ -375,7 +410,9 @@ check_address_records(dns_view_t *view, dns_db_t *hints, dns_db_t *db,
 		while (result == ISC_R_SUCCESS) {
 			dns_rdata_reset(&rdata);
 			dns_rdataset_current(&hintrrset, &rdata);
-			if (!inrrset(&rootrrset, &rdata)) {
+			if (!inrrset(&rootrrset, &rdata) &&
+			    !changing(name, dns_rdatatype_a, now))
+			{
 				report(view, name, false, &rdata);
 			}
 			result = dns_rdataset_next(&hintrrset);
@@ -414,7 +451,9 @@ check_address_records(dns_view_t *view, dns_db_t *hints, dns_db_t *db,
 		while (result == ISC_R_SUCCESS) {
 			dns_rdata_reset(&rdata);
 			dns_rdataset_current(&rootrrset, &rdata);
-			if (!inrrset(&hintrrset, &rdata)) {
+			if (!inrrset(&hintrrset, &rdata) &&
+			    !changing(name, dns_rdatatype_aaaa, now))
+			{
 				report(view, name, true, &rdata);
 			}
 			dns_rdata_reset(&rdata);
@@ -424,7 +463,9 @@ check_address_records(dns_view_t *view, dns_db_t *hints, dns_db_t *db,
 		while (result == ISC_R_SUCCESS) {
 			dns_rdata_reset(&rdata);
 			dns_rdataset_current(&hintrrset, &rdata);
-			if (!inrrset(&rootrrset, &rdata)) {
+			if (!inrrset(&rootrrset, &rdata) &&
+			    !changing(name, dns_rdatatype_aaaa, now))
+			{
 				report(view, name, false, &rdata);
 			}
 			dns_rdata_reset(&rdata);

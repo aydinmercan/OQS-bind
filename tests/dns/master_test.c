@@ -73,7 +73,7 @@ add_callback(void *arg, const dns_name_t *owner,
 
 	isc_buffer_init(&target, buf, BIGBUFLEN);
 	result = dns_rdataset_totext(dataset, owner, false, false, &target);
-	return (result);
+	return result;
 }
 
 static void
@@ -103,7 +103,7 @@ setup_master(void (*warn)(struct dns_rdatacallbacks *, const char *, ...),
 	result = dns_name_fromtext(&dns_origin, &source, dns_rootname, 0,
 				   &target);
 	if (result != ISC_R_SUCCESS) {
-		return (result);
+		return result;
 	}
 
 	dns_rdatacallbacks_init_stdio(&callbacks);
@@ -117,7 +117,7 @@ setup_master(void (*warn)(struct dns_rdatacallbacks *, const char *, ...),
 		callbacks.error = error;
 	}
 	headerset = false;
-	return (result);
+	return result;
 }
 
 static isc_result_t
@@ -129,7 +129,7 @@ test_master(const char *workdir, const char *testfile,
 
 	result = setup_master(warn, error);
 	if (result != ISC_R_SUCCESS) {
-		return (result);
+		return result;
 	}
 
 	dns_rdatacallbacks_init_stdio(&callbacks);
@@ -146,7 +146,7 @@ test_master(const char *workdir, const char *testfile,
 	if (workdir != NULL) {
 		result = isc_dir_chdir(workdir);
 		if (result != ISC_R_SUCCESS) {
-			return (result);
+			return result;
 		}
 	}
 
@@ -154,7 +154,7 @@ test_master(const char *workdir, const char *testfile,
 				     dns_rdataclass_in, true, 0, &callbacks,
 				     NULL, NULL, mctx, format, 0);
 
-	return (result);
+	return result;
 }
 
 static void
@@ -472,8 +472,9 @@ ISC_RUN_TEST_IMPL(dumpraw) {
 				   &target);
 	assert_int_equal(result, ISC_R_SUCCESS);
 
-	result = dns_db_create(mctx, "rbt", &dnsorigin, dns_dbtype_zone,
-			       dns_rdataclass_in, 0, NULL, &db);
+	result = dns_db_create(mctx, ZONEDB_DEFAULT, &dnsorigin,
+			       dns_dbtype_zone, dns_rdataclass_in, 0, NULL,
+			       &db);
 	assert_int_equal(result, ISC_R_SUCCESS);
 
 	result = isc_dir_chdir(SRCDIR);

@@ -54,6 +54,8 @@
 #include <dns/rdatastruct.h>
 #include <dns/types.h>
 
+#define DNS_RDATASET_MAXADDITIONAL 13
+
 /* Fixed RRSet helper macros */
 
 #define DNS_RDATASET_LENGTH 2;
@@ -99,6 +101,8 @@ typedef struct dns_rdatasetmethods {
 	void (*getownercase)(const dns_rdataset_t *rdataset, dns_name_t *name);
 	isc_result_t (*addglue)(dns_rdataset_t	*rdataset,
 				dns_dbversion_t *version, dns_message_t *msg);
+	bool (*equals)(const dns_rdataset_t *rdataset1,
+		       const dns_rdataset_t *rdataset2);
 } dns_rdatasetmethods_t;
 
 #define DNS_RDATASET_MAGIC	ISC_MAGIC('D', 'N', 'S', 'R')
@@ -144,7 +148,10 @@ struct dns_rdataset {
 	 * This RRSIG RRset should be re-generated around this time.
 	 * Only valid if DNS_RDATASETATTR_RESIGN is set in attributes.
 	 */
-	isc_stdtime_t resign;
+	union {
+		isc_stdtime_t resign;
+		isc_stdtime_t expire;
+	};
 
 	/*%
 	 * Extra fields used by various rdataset implementations, that is, by
@@ -184,12 +191,12 @@ struct dns_rdataset {
 		 * comments in rbtdb.c for details.)
 		 */
 		struct {
-			struct dns_db *db;
-			dns_dbnode_t  *node;
-			unsigned char *raw;
-			unsigned char *iter_pos;
-			unsigned int   iter_count;
-			dns_proof_t   *noqname, *closest;
+			struct dns_db	       *db;
+			dns_dbnode_t	       *node;
+			unsigned char	       *raw;
+			unsigned char	       *iter_pos;
+			unsigned int		iter_count;
+			dns_slabheader_proof_t *noqname, *closest;
 		} slab;
 
 		/*
@@ -223,11 +230,10 @@ struct dns_rdataset {
 
 #define DNS_RDATASET_COUNT_UNDEFINED UINT32_MAX
 
-#define DNS_RDATASET_INIT                                                  \
-	{                                                                  \
-		.magic = DNS_RDATASET_MAGIC, .link = ISC_LINK_INITIALIZER, \
-		.count = DNS_RDATASET_COUNT_UNDEFINED                      \
-	}
+#define DNS_RDATASET_INIT               \
+	{ .magic = DNS_RDATASET_MAGIC,  \
+	  .link = ISC_LINK_INITIALIZER, \
+	  .count = DNS_RDATASET_COUNT_UNDEFINED }
 
 /*!
  * \def DNS_RDATASETATTR_RENDERED
@@ -277,6 +283,7 @@ struct dns_rdataset {
 #define DNS_RDATASETATTR_STALE_WINDOW 0x04000000
 #define DNS_RDATASETATTR_STALE_ADDED  0x08000000
 #define DNS_RDATASETATTR_KEEPCASE     0x10000000
+#define DNS_RDATASETATTR_STATICSTUB   0x20000000
 
 /*%
  * _OMITDNSSEC:
@@ -535,7 +542,8 @@ dns_rdataset_towirepartial(dns_rdataset_t   *rdataset,
 isc_result_t
 dns_rdataset_additionaldata(dns_rdataset_t	    *rdataset,
 			    const dns_name_t	    *owner_name,
-			    dns_additionaldatafunc_t add, void *arg);
+			    dns_additionaldatafunc_t add, void *arg,
+			    size_t limit);
 /*%<
  * For each rdata in rdataset, call 'add' for each name and type in the
  * rdata which is subject to additional section processing.
@@ -554,9 +562,14 @@ dns_rdataset_additionaldata(dns_rdataset_t	    *rdataset,
  *\li	If a call to dns_rdata_additionaldata() is not successful, the
  *	result returned will be the result of dns_rdataset_additionaldata().
  *
+ *\li	If 'limit' is non-zero and the number of the rdatasets is larger
+ *	than 'limit', no additional data will be processed.
+ *
  * Returns:
  *
  *\li	#ISC_R_SUCCESS
+ *
+ *\li	#DNS_R_TOOMANYRECORDS in case rdataset count is larger than 'limit'
  *
  *\li	Any error that dns_rdata_additionaldata() can return.
  */
@@ -685,4 +698,14 @@ dns_trust_totext(dns_trust_t trust);
  * Display trust in textual form.
  */
 
+bool
+dns_rdataset_equals(const dns_rdataset_t *rdataset1,
+		    const dns_rdataset_t *rdataset2);
+/*%<
+ * Returns true if the rdata in the rdataset is equal.
+ *
+ * Requires:
+ * \li	'rdataset1' is a valid rdataset.
+ * \li	'rdataset2' is a valid rdataset.
+ */
 ISC_LANG_ENDDECLS

@@ -26,6 +26,7 @@
 #include <isc/magic.h>
 #include <isc/mem.h>
 #include <isc/netmgr.h>
+#include <isc/proxy2.h>
 #include <isc/quota.h>
 #include <isc/random.h>
 #include <isc/refcount.h>
@@ -35,6 +36,7 @@
 #include <isc/stats.h>
 #include <isc/thread.h>
 #include <isc/tid.h>
+#include <isc/time.h>
 #include <isc/tls.h>
 #include <isc/util.h>
 #include <isc/uv.h>
@@ -58,11 +60,13 @@
  */
 #define ISC_NETMGR_UDP_RECVBUF_SIZE UINT16_MAX
 #endif
+#define ISC_NETMGR_UDP_SENDBUF_SIZE UINT16_MAX
 
 /*
- * The TCP receive buffer can fit one maximum sized DNS message plus its size,
- * the receive buffer here affects TCP, DoT and DoH.
+ * The TCP send and receive buffers can fit one maximum sized DNS message plus
+ * its size, the receive buffer here affects TCP, DoT and DoH.
  */
+#define ISC_NETMGR_TCP_SENDBUF_SIZE (sizeof(uint16_t) + UINT16_MAX)
 #define ISC_NETMGR_TCP_RECVBUF_SIZE (sizeof(uint16_t) + UINT16_MAX)
 
 /* Pick the larger buffer */
@@ -82,6 +86,11 @@ STATIC_ASSERT(ISC_NETMGR_UDP_RECVBUF_SIZE <= ISC_NETMGR_RECVBUF_SIZE,
 STATIC_ASSERT(ISC_NETMGR_TCP_RECVBUF_SIZE <= ISC_NETMGR_RECVBUF_SIZE,
 	      "TCP receive buffer size must be smaller or equal than worker "
 	      "receive buffer size");
+
+/*%
+ * Maximum outstanding DNS message that we process in a single TCP read.
+ */
+#define ISC_NETMGR_MAX_STREAM_CLIENTS_PER_CONN 23
 
 /*%
  * Regular TCP buffer size.
@@ -108,8 +117,12 @@ STATIC_ASSERT(ISC_NETMGR_TCP_RECVBUF_SIZE <= ISC_NETMGR_RECVBUF_SIZE,
  * How many isc_nmhandles and isc_nm_uvreqs will we be
  * caching for reuse in a socket.
  */
+#define ISC_NM_NMSOCKET_MAX  64
 #define ISC_NM_NMHANDLES_MAX 64
 #define ISC_NM_UVREQS_MAX    64
+
+/*% ISC_PROXY2_MIN_AF_UNIX_SIZE is the largest type when TLVs are not used */
+#define ISC_NM_PROXY2_DEFAULT_BUFFER_SIZE (ISC_PROXY2_MIN_AF_UNIX_SIZE)
 
 /*
  * Define ISC_NETMGR_TRACE to activate tracing of handles and sockets.
@@ -122,7 +135,7 @@ STATIC_ASSERT(ISC_NETMGR_TCP_RECVBUF_SIZE <= ISC_NETMGR_RECVBUF_SIZE,
 
 #if defined(__linux__)
 #include <syscall.h>
-#define gettid() (uint64_t) syscall(SYS_gettid)
+#define gettid() (uint64_t)syscall(SYS_gettid)
 #elif defined(__FreeBSD__)
 #include <pthread_np.h>
 #define gettid() (uint64_t)(pthread_getthreadid_np())
@@ -206,13 +219,19 @@ typedef struct isc__networker {
 
 	ISC_LIST(isc_nmsocket_t) active_sockets;
 
+	isc_mempool_t *nmsocket_pool;
 	isc_mempool_t *uvreq_pool;
 } isc__networker_t;
 
 ISC_REFCOUNT_DECL(isc__networker);
 
+#ifdef ISC_NETMGR_TRACE
 void
 isc__nm_dump_active(isc__networker_t *worker);
+
+void
+isc__nm_dump_active_manager(isc_nm_t *netmgr);
+#endif /* ISC_NETMGR_TRACE */
 
 /*
  * A general handle for a connection bound to a networker.  For UDP
@@ -244,6 +263,8 @@ struct isc_nmhandle {
 
 	isc_sockaddr_t peer;
 	isc_sockaddr_t local;
+	bool proxy_is_unspec;
+	struct isc_nmhandle *proxy_udphandle;
 	isc_nm_opaquecb_t doreset; /* reset extra callback, external */
 	isc_nm_opaquecb_t dofree;  /* free extra callback, external */
 #if ISC_NETMGR_TRACE
@@ -290,14 +311,9 @@ struct isc__nm_uvreq {
 
 	union {
 		uv_handle_t handle;
-		uv_req_t req;
-		uv_getaddrinfo_t getaddrinfo;
-		uv_getnameinfo_t getnameinfo;
-		uv_shutdown_t shutdown;
 		uv_write_t write;
 		uv_connect_t connect;
 		uv_udp_send_t udp_send;
-		uv_fs_t fs;
 	} uv_req;
 	ISC_LINK(isc__nm_uvreq_t) link;
 	ISC_LINK(isc__nm_uvreq_t) active_link;
@@ -317,7 +333,6 @@ struct isc_nm {
 	isc_mem_t *mctx;
 	isc_loopmgr_t *loopmgr;
 	uint32_t nloops;
-	isc_mutex_t lock;
 	isc__networker_t *workers;
 
 	isc_stats_t *stats;
@@ -375,7 +390,8 @@ typedef enum {
 	STATID_SENDFAIL = 8,
 	STATID_RECVFAIL = 9,
 	STATID_ACTIVE = 10,
-	STATID_MAX = 11,
+	STATID_CLIENTS = 11,
+	STATID_MAX = 12,
 } isc__nm_statid_t;
 
 typedef struct isc_nmsocket_tls_send_req {
@@ -402,13 +418,8 @@ typedef enum isc_http_scheme_type {
 	ISC_HTTP_SCHEME_UNSUPPORTED
 } isc_http_scheme_type_t;
 
-typedef struct isc_nm_httpcbarg {
-	isc_nm_recv_cb_t cb;
-	void *cbarg;
-	LINK(struct isc_nm_httpcbarg) link;
-} isc_nm_httpcbarg_t;
-
 typedef struct isc_nm_httphandler {
+	int magic;
 	char *path;
 	isc_nm_recv_cb_t cb;
 	void *cbarg;
@@ -420,7 +431,6 @@ struct isc_nm_http_endpoints {
 	isc_mem_t *mctx;
 
 	ISC_LIST(isc_nm_httphandler_t) handlers;
-	ISC_LIST(isc_nm_httpcbarg_t) handler_cbargs;
 
 	isc_refcount_t references;
 	atomic_bool in_use;
@@ -432,7 +442,6 @@ typedef struct isc_nmsocket_h2 {
 	char *query_data;
 	size_t query_data_len;
 	bool query_too_large;
-	isc_nm_httphandler_t *handler;
 
 	isc_buffer_t rbuf;
 	isc_buffer_t wbuf;
@@ -463,6 +472,9 @@ typedef struct isc_nmsocket_h2 {
 	isc_nm_http_endpoints_t **listener_endpoints;
 	size_t n_listener_endpoints;
 
+	isc_nm_http_endpoints_t *peer_endpoints;
+
+	bool request_received;
 	bool response_submitted;
 	struct {
 		char *uri;
@@ -505,6 +517,7 @@ struct isc_nmsocket {
 		isc_tlsctx_t **listener_tls_ctx; /*%< A context reference per
 						    worker */
 		size_t n_listener_tls_ctx;
+		char *sni_hostname;
 		isc_tlsctx_client_session_cache_t *client_sess_cache;
 		bool client_session_saved;
 		isc_nmsocket_t *tlslistener;
@@ -523,7 +536,7 @@ struct isc_nmsocket {
 	} tlsstream;
 
 #if HAVE_LIBNGHTTP2
-	isc_nmsocket_h2_t h2;
+	isc_nmsocket_h2_t *h2;
 #endif /* HAVE_LIBNGHTTP2 */
 
 	struct {
@@ -536,6 +549,22 @@ struct isc_nmsocket {
 		bool dot_alpn_negotiated;
 		const char *tls_verify_error;
 	} streamdns;
+
+	struct {
+		isc_nmsocket_t *sock;
+		bool reading;
+		size_t nsending;
+		void *send_req;
+		union {
+			isc_proxy2_handler_t *handler; /* server */
+			isc_buffer_t *outbuf;	       /* client */
+		} proxy2;
+		bool header_processed;
+		bool extra_processed; /* data arrived past header processed */
+		isc_nmsocket_t **udp_server_socks; /* UDP sockets */
+		size_t udp_server_socks_num;
+	} proxy;
+
 	/*%
 	 * pquota is a non-attached pointer to the TCP client quota, stored in
 	 * listening sockets.
@@ -559,6 +588,12 @@ struct isc_nmsocket {
 	 * TCP write timeout timer.
 	 */
 	uint64_t write_timeout;
+
+	/*
+	 * Reading was throttled over TCP as the peer does not read the
+	 * data we are sending back.
+	 */
+	bool reading_throttled;
 
 	/*% outer socket is for 'wrapped' sockets - e.g. tcpdns in tcp */
 	isc_nmsocket_t *outer;
@@ -611,6 +646,12 @@ struct isc_nmsocket {
 	bool timedout;
 
 	/*%
+	 * A timestamp of when the connection acceptance was delayed due
+	 * to quota.
+	 */
+	isc_nanosecs_t quota_accept_ts;
+
+	/*%
 	 * Established an outgoing connection, as client not server.
 	 */
 	bool client;
@@ -640,6 +681,9 @@ struct isc_nmsocket {
 	 */
 	ISC_LIST(isc_nmhandle_t) active_handles;
 	ISC_LIST(isc__nm_uvreq_t) active_uvreqs;
+
+	size_t active_handles_cur;
+	size_t active_handles_max;
 
 	/*%
 	 * Used to pass a result back from listen or connect events.
@@ -1013,9 +1057,6 @@ isc__nmhandle_http_keepalive(isc_nmhandle_t *handle, bool value);
  */
 
 void
-isc__nm_http_initsocket(isc_nmsocket_t *sock);
-
-void
 isc__nm_http_cleanup_data(isc_nmsocket_t *sock);
 
 isc_result_t
@@ -1068,6 +1109,9 @@ isc__nm_httpsession_attach(isc_nm_http_session_t *source,
 			   isc_nm_http_session_t **targetp);
 void
 isc__nm_httpsession_detach(isc_nm_http_session_t **sessionp);
+
+isc_nmhandle_t *
+isc__nm_httpsession_handle(isc_nm_http_session_t *session);
 
 void
 isc__nm_http_set_tlsctx(isc_nmsocket_t *sock, isc_tlsctx_t *tlsctx);
@@ -1136,6 +1180,124 @@ void
 isc__nm_streamdns_failed_read_cb(isc_nmsocket_t *sock, isc_result_t result,
 				 bool async);
 
+bool
+isc__nm_valid_proxy_addresses(const isc_sockaddr_t *src,
+			      const isc_sockaddr_t *dst);
+
+void
+isc__nm_proxystream_failed_read_cb(isc_nmsocket_t *sock, isc_result_t result,
+				   bool async);
+
+void
+isc__nm_proxystream_stoplistening(isc_nmsocket_t *sock);
+
+void
+isc__nm_proxystream_cleanup_data(isc_nmsocket_t *sock);
+
+void
+isc__nmhandle_proxystream_cleartimeout(isc_nmhandle_t *handle);
+
+void
+isc__nmhandle_proxystream_settimeout(isc_nmhandle_t *handle, uint32_t timeout);
+
+void
+isc__nmhandle_proxystream_keepalive(isc_nmhandle_t *handle, bool value);
+
+void
+isc__nmhandle_proxystream_setwritetimeout(isc_nmhandle_t *handle,
+					  uint64_t write_timeout);
+
+void
+isc__nmsocket_proxystream_reset(isc_nmsocket_t *sock);
+
+bool
+isc__nmsocket_proxystream_timer_running(isc_nmsocket_t *sock);
+
+void
+isc__nmsocket_proxystream_timer_restart(isc_nmsocket_t *sock);
+
+void
+isc__nmsocket_proxystream_timer_stop(isc_nmsocket_t *sock);
+
+void
+isc__nmhandle_proxystream_set_manual_timer(isc_nmhandle_t *handle,
+					   const bool manual);
+
+isc_result_t
+isc__nmhandle_proxystream_set_tcp_nodelay(isc_nmhandle_t *handle,
+					  const bool value);
+
+void
+isc__nm_proxystream_read_stop(isc_nmhandle_t *handle);
+
+void
+isc__nm_proxystream_close(isc_nmsocket_t *sock);
+
+void
+isc__nm_proxystream_read(isc_nmhandle_t *handle, isc_nm_recv_cb_t cb,
+			 void *cbarg);
+
+void
+isc__nm_proxystream_send(isc_nmhandle_t *handle, isc_region_t *region,
+			 isc_nm_cb_t cb, void *cbarg);
+
+void
+isc__nm_proxystream_senddns(isc_nmhandle_t *handle, isc_region_t *region,
+			    isc_nm_cb_t cb, void *cbarg);
+
+void
+isc__nm_proxystream_set_tlsctx(isc_nmsocket_t *listener, isc_tlsctx_t *tlsctx);
+
+bool
+isc__nm_proxystream_has_encryption(const isc_nmhandle_t *handle);
+
+const char *
+isc__nm_proxystream_verify_tls_peer_result_string(const isc_nmhandle_t *handle);
+
+void
+isc__nmhandle_proxystream_get_selected_alpn(isc_nmhandle_t *handle,
+					    const unsigned char **alpn,
+					    unsigned int *alpnlen);
+
+void
+isc__nm_proxyudp_failed_read_cb(isc_nmsocket_t *sock, const isc_result_t result,
+				const bool async);
+
+void
+isc__nm_proxyudp_stoplistening(isc_nmsocket_t *listener);
+
+void
+isc__nm_proxyudp_cleanup_data(isc_nmsocket_t *sock);
+
+void
+isc__nmhandle_proxyudp_cleartimeout(isc_nmhandle_t *handle);
+
+void
+isc__nmhandle_proxyudp_settimeout(isc_nmhandle_t *handle, uint32_t timeout);
+
+void
+isc__nmhandle_proxyudp_setwritetimeout(isc_nmhandle_t *handle,
+				       uint64_t write_timeout);
+
+bool
+isc__nmsocket_proxyudp_timer_running(isc_nmsocket_t *sock);
+
+void
+isc__nmsocket_proxyudp_timer_restart(isc_nmsocket_t *sock);
+
+void
+isc__nmsocket_proxyudp_timer_stop(isc_nmsocket_t *sock);
+
+void
+isc__nm_proxyudp_close(isc_nmsocket_t *sock);
+
+void
+isc__nm_proxyudp_read(isc_nmhandle_t *handle, isc_nm_recv_cb_t cb, void *cbarg);
+
+void
+isc__nm_proxyudp_send(isc_nmhandle_t *handle, isc_region_t *region,
+		      isc_nm_cb_t cb, void *cbarg);
+
 void
 isc__nm_incstats(isc_nmsocket_t *sock, isc__nm_statid_t id);
 /*%<
@@ -1161,7 +1323,7 @@ isc__nm_closesocket(uv_os_sock_t sock);
  */
 
 isc_result_t
-isc__nm_socket_reuse(uv_os_sock_t fd);
+isc__nm_socket_reuse(uv_os_sock_t fd, int val);
 /*%<
  * Set the SO_REUSEADDR or SO_REUSEPORT (or equivalent) socket option on the fd
  */
@@ -1170,12 +1332,6 @@ isc_result_t
 isc__nm_socket_reuse_lb(uv_os_sock_t fd);
 /*%<
  * Set the SO_REUSEPORT_LB (or equivalent) socket option on the fd
- */
-
-isc_result_t
-isc__nm_socket_incoming_cpu(uv_os_sock_t fd);
-/*%<
- * Set the SO_INCOMING_CPU socket option on the fd if available
  */
 
 isc_result_t
@@ -1322,6 +1478,14 @@ isc__nmsocket_log(const isc_nmsocket_t *sock, int level, const char *fmt, ...)
 void
 isc__nmhandle_log(const isc_nmhandle_t *handle, int level, const char *fmt, ...)
 	ISC_FORMAT_PRINTF(3, 4);
+
+void
+isc__nm_received_proxy_header_log(isc_nmhandle_t *handle,
+				  const isc_proxy2_command_t cmd,
+				  const int socktype,
+				  const isc_sockaddr_t *restrict src_addr,
+				  const isc_sockaddr_t *restrict dst_addr,
+				  const isc_region_t *restrict tlvs);
 
 void
 isc__nmhandle_set_manual_timer(isc_nmhandle_t *handle, const bool manual);

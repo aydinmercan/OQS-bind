@@ -15,10 +15,10 @@
 # a shell variable in AC_INIT
 #
 m4_define([bind_VERSION_MAJOR], 9)dnl
-m4_define([bind_VERSION_MINOR], 19)dnl
-m4_define([bind_VERSION_PATCH], 17)dnl
-m4_define([bind_VERSION_EXTRA], )dnl
-m4_define([bind_DESCRIPTION], [(Development Release)])dnl
+m4_define([bind_VERSION_MINOR], 20)dnl
+m4_define([bind_VERSION_PATCH], 7)dnl
+m4_define([bind_VERSION_EXTRA], -dev)dnl
+m4_define([bind_DESCRIPTION], [(Stable Release)])dnl
 m4_define([bind_SRCID], [m4_esyscmd_s([git rev-parse --short HEAD | cut -b1-7])])dnl
 m4_define([bind_PKG_VERSION], [[bind_VERSION_MAJOR.bind_VERSION_MINOR.bind_VERSION_PATCH]bind_VERSION_EXTRA])dnl
 
@@ -137,6 +137,9 @@ AC_COMPILE_IFELSE(
   [],
   [STD_CFLAGS="$STD_CFLAGS -Wno-stringop-overread"])
 
+# Silence GCC 11.1+ note about the changed alignment, see GL #4841
+AS_CASE([$target_cpu],[i?86],[STD_CFLAGS="$STD_CFLAGS -Wno-psabi"])
+
 STD_LDFLAGS=""
 
 # ... except in test code
@@ -175,7 +178,7 @@ AC_ARG_ENABLE([developer],
 
 AS_IF([test "$enable_developer" = "yes"],
       [DEVELOPER_MODE=yes
-       STD_CPPFLAGS="$STD_CPPFLAGS -DISC_MEM_DEFAULTFILL=1 -DISC_MEM_TRACKLINES=1 -DISC_LIST_CHECKINIT=1 -DISC_STATS_CHECKUNDERFLOW=1 -DDNS_RBTDB_STRONG_RWLOCK_CHECK=1"
+       STD_CPPFLAGS="$STD_CPPFLAGS -DISC_MEM_DEFAULTFILL=1 -DISC_MEM_TRACKLINES=1 -DISC_LIST_CHECKINIT=1 -DISC_STATS_CHECKUNDERFLOW=1 -DDNS_RBTDB_STRONG_RWLOCK_CHECK=1 -DISC_MUTEX_ERROR_CHECK=1"
        test "${enable_fixed_rrset+set}" = set || enable_fixed_rrset=yes
        test "${enable_querytrace+set}" = set || enable_querytrace=yes
        test "${with_cmocka+set}" = set || with_cmocka=yes
@@ -208,10 +211,10 @@ AS_IF([test -z "$PKG_CONFIG"],
 #
 # Pick Userspace-RCU flavor (developer only option)
 #
-# [pairwise: --with-liburcu=membarrier, --with-liburcu=qsbr, --with-liburcu=mb, --with-liburcu=signal, --with-liburcu=bp]
+# [pairwise: skip]
 AC_ARG_WITH([liburcu],
 	    [AS_HELP_STRING([--with-liburcu=FLAVOR],
-			     [Build with Userspace-RCU variant (membarrier|qsbr|mb|signal|bp) [default=membarrier]]))],
+			     [Build with Userspace-RCU variant (developer-only option) (membarrier|qsbr|mb|bp) [default=membarrier]]))],
 	    [], [with_liburcu=membarrier])
 
 AC_MSG_CHECKING([liburcu flavor])
@@ -225,13 +228,13 @@ AS_CASE([$with_liburcu],
 	[mb],
 	[RCU_FLAVOR="liburcu-mb"
 	 AC_DEFINE([RCU_MB], [1], [Build with mb Userspace-RCU flavor])],
-	[signal],
-	[RCU_FLAVOR="liburcu-signal"
-	 AC_DEFINE([RCU_SIGNAL], [1], [Build with signal Userspace-RCU flavor])],
 	[bp],
 	[RCU_FLAVOR="liburcu-bp"
 	 AC_DEFINE([RCU_BP], [1], [Build with bulletproof Userspace-RCU flavor])],
 	[AC_MSG_ERROR([Invalid Userspace-RCU flavor picked])])
+
+AS_IF([test "$with_liburcu" != "membarrier" && test "$enable_developer" != "yes"],
+      [AC_MSG_ERROR([Changing Userspace-RCU variant is allowed only in developer mode])])
 
 AC_MSG_RESULT([$RCU_FLAVOR])
 
@@ -315,26 +318,6 @@ AC_PATH_PROGS([PERL], [perl5 perl])
 AC_SUBST([PERL])
 AM_CONDITIONAL([HAVE_PERL], [test -n "$PERL"])
 
-AX_PERL_MODULE([Digest::HMAC])
-AM_CONDITIONAL([HAVE_PERLMOD_DIGEST_HMAC],
-	       [test "$HAVE_PERLMOD_DIGEST__HMAC" = "yes"])
-
-AX_PERL_MODULE([File::Fetch])
-AM_CONDITIONAL([HAVE_PERLMOD_FILE_FETCH],
-	       [test "$HAVE_PERLMOD_FILE__FETCH" = "yes"])
-
-AX_PERL_MODULE([Net::DNS])
-AM_CONDITIONAL([HAVE_PERLMOD_NET_DNS],
-	       [test "$HAVE_PERLMOD_NET__DNS" = "yes"])
-
-AX_PERL_MODULE([Net::DNS::Nameserver])
-AM_CONDITIONAL([HAVE_PERLMOD_NET_DNS_NAMESERVER],
-	       [test "$HAVE_PERLMOD_NET__DNS__NAMESERVER" = "yes"])
-
-AX_PERL_MODULE([Time::HiRes])
-AM_CONDITIONAL([HAVE_PERLMOD_TIME_HIRES],
-	       [test "$HAVE_PERLMOD_TIME__HIRES" = "yes"])
-
 #
 # Python is optional, it is used only by some of the system test scripts.
 #
@@ -346,9 +329,6 @@ AS_IF([test -z "$PYTEST"],
       [AC_MSG_WARN([pytest not found, some system tests will be skipped])])
 AC_SUBST([PYTEST])
 AM_CONDITIONAL([HAVE_PYTEST], [test -n "$PYTEST"])
-
-AX_PYTHON_MODULE([dns])
-AM_CONDITIONAL([HAVE_PYMOD_DNS], [test "$HAVE_PYMOD_DNS" = "yes"])
 
 #
 # xsltproc is optional, it is used only by system test scripts.
@@ -366,7 +346,8 @@ AS_CASE([$host],
 		  ])
 	])
 
-AC_CHECK_HEADERS([fcntl.h regex.h sys/time.h unistd.h sys/mman.h sys/sockio.h sys/select.h sys/param.h sys/sysctl.h net/if6.h sys/socket.h net/route.h linux/netlink.h linux/rtnetlink.h], [], [],
+AC_CHECK_HEADERS([sys/param.h sys/socket.h])
+AC_CHECK_HEADERS([fcntl.h regex.h sys/time.h unistd.h sys/mman.h sys/sockio.h sys/select.h sys/sysctl.h net/if6.h net/route.h linux/netlink.h linux/rtnetlink.h], [], [],
 		 [$ac_includes_default
 		  #ifdef HAVE_SYS_PARAM_H
 		  # include <sys/param.h>
@@ -415,7 +396,7 @@ AC_COMPILE_IFELSE(
   ],
   [AC_MSG_FAILURE([stdatomic.h header found, but compilation failed, please fix your toolchain.])])
 
-AC_CHECK_HEADERS([stdalign.h stdnoreturn.h],
+AC_CHECK_HEADERS([stdnoreturn.h],
 		 [],
 		 [AC_MSG_ERROR([C11 standard headers not found, update your toolchain.])])
 
@@ -452,12 +433,6 @@ AS_CASE([$host],
 	     [AC_MSG_RESULT([no])])])
 
 AC_CHECK_FUNCS([sysctlbyname])
-
-#
-# Check for uid/gid setting variants
-#
-AC_CHECK_FUNCS([setresuid setreuid getresuid])
-AC_CHECK_FUNCS([setresgid setregid getresgid])
 
 AC_TYPE_SIZE_T
 AC_TYPE_SSIZE_T
@@ -580,38 +555,15 @@ LIBS="$PTHREAD_LIBS $LIBS"
 CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
 CC="$PTHREAD_CC"
 
+AC_MSG_CHECKING([for PTHREAD_MUTEX_ADAPTIVE_NP])
+AC_COMPILE_IFELSE(
+  [AC_LANG_PROGRAM([[#include <pthread.h>]],
+		   [[(void)pthread_mutexattr_settype(&(pthread_mutexattr_t){ NULL }, PTHREAD_MUTEX_ADAPTIVE_NP);]])],
+  [AC_MSG_RESULT([yes])
+   AC_DEFINE([HAVE_PTHREAD_MUTEX_ADAPTIVE_NP], [1], [Define to 1 if PTHREAD_MUTEX_ADAPTIVE_NP is available])],
+  [AC_MSG_RESULT([no])])
+
 AC_CHECK_FUNCS([pthread_attr_getstacksize pthread_attr_setstacksize pthread_barrier_init pthread_spin_init])
-
-# [pairwise: --with-locktype=adaptive, --with-locktype=standard]
-AC_ARG_WITH([locktype],
-	    AS_HELP_STRING([--with-locktype=ARG],
-			   [Specify mutex lock type
-			    (adaptive or standard)]),
-	    [], [with_locktype="adaptive"])
-
-AS_CASE([$with_locktype],
-	[adaptive],[
-	  AC_MSG_CHECKING([for PTHREAD_MUTEX_ADAPTIVE_NP])
-	  AC_COMPILE_IFELSE(
-	    [AC_LANG_PROGRAM(
-	       [[
-		 #ifndef _GNU_SOURCE
-		 #define _GNU_SOURCE
-		 #endif
-		 #include <pthread.h>
-	       ]],
-	       [[
-		 return (PTHREAD_MUTEX_ADAPTIVE_NP);
-	       ]]
-	     )],
-	    [AC_MSG_RESULT([using adaptive lock type])
-	     AC_DEFINE([HAVE_PTHREAD_MUTEX_ADAPTIVE_NP], 1,
-		       [Support for PTHREAD_MUTEX_ADAPTIVE_NP]) ],
-	    [AC_MSG_RESULT([using standard lock type])]
-	  )],
-	[standard],[AC_MSG_RESULT([using standard lock type])],
-	[AC_MSG_ERROR([You must specify "adaptive" or "standard" for --with-locktype.])]
-       )
 
 AC_CHECK_HEADERS([sched.h])
 
@@ -678,9 +630,16 @@ AM_CONDITIONAL([HAVE_LIBNGHTTP2], [test -n "$LIBNGHTTP2_LIBS"])
 AC_CHECK_FUNCS([flockfile getc_unlocked])
 
 #
-# Look for sysconf to allow detection of the number of processors.
+# Look for sysconf or other ways to allow detection of the number of processors.
 #
 AC_CHECK_FUNCS([sysconf])
+AC_CHECK_FUNCS(sysconf sched_getaffinity cpuset_getaffinity)
+AC_CHECK_HEADERS([sys/cpuset.h], [], [],
+		 [$ac_includes_default
+		  #ifdef HAVE_SYS_PARAM_H
+		  # include <sys/param.h>
+		  #endif
+		 ])
 
 #
 # Do we want to use pthread rwlock?
@@ -745,6 +704,7 @@ AC_CHECK_FUNCS([SSL_read_ex SSL_peek_ex SSL_write_ex])
 AC_CHECK_FUNCS([SSL_CTX_set1_cert_store X509_STORE_up_ref])
 AC_CHECK_FUNCS([SSL_CTX_up_ref])
 AC_CHECK_FUNCS([SSL_SESSION_is_resumable])
+AC_CHECK_FUNCS([SSL_CTX_set_ciphersuites])
 
 #
 # Check for algorithm support in OpenSSL
@@ -794,12 +754,6 @@ AC_CHECK_FUNCS([EVP_sha1], [:],
 #
 AC_CHECK_FUNCS([EVP_sha224 EVP_sha256 EVP_sha384 EVP_sha512], [:],
 	       [AC_MSG_FAILURE([SHA-2 support in OpenSSL is mandatory.])])
-
-#
-# Check for OpenSSL AES support
-#
-AC_CHECK_FUNCS([EVP_aes_128_ecb EVP_aes_192_ecb EVP_aes_256_ecb], [:],
-	       [AC_MSG_FAILURE([AES support in OpenSSL is mandatory.])])
 
 #
 # Check for OpenSSL 1.1.x/LibreSSL functions
@@ -1263,8 +1217,8 @@ AC_ARG_ENABLE([fixed-rrset],
 			      [enable fixed rrset ordering [default=no]])],
 	      [], [enable_fixed_rrset="no"])
 AS_IF([test "$enable_fixed_rrset" = "yes"],
-      [AC_DEFINE([DNS_RDATASET_FIXED], [1],
-		 [Define to enable "rrset-order fixed" syntax.])])
+      [AC_MSG_WARN([fixed rrset ordering is deprecated and will be removed in the future release])
+       AC_DEFINE([DNS_RDATASET_FIXED], [1], [Define to enable "rrset-order fixed" syntax.])])
 
 #
 # Activate dnstap?
@@ -1302,20 +1256,16 @@ AC_ARG_VAR([SPHINX_BUILD], [path to sphinx-build binary used to build the docume
 AC_PATH_PROG([SPHINX_BUILD], [sphinx-build], [])
 AM_CONDITIONAL([HAVE_SPHINX_BUILD], [test -n "$SPHINX_BUILD"])
 
-AC_PATH_PROG([XELATEX], [xelatex], [])
-AC_PATH_PROG([LATEXMK], [latexmk], [])
-AM_CONDITIONAL([HAVE_XELATEX], [test -n "$XELATEX" && test -n "$LATEXMK"])
-
 #
 # Build the man pages only if we have prebuilt manpages or we can build them from RST sources
 #
 AM_CONDITIONAL([BUILD_MANPAGES], [test -e doc/man/named.conf.5in || test -n "$SPHINX_BUILD"])
 
 #
-# Pull release date from CHANGES file last modification date
+# Pull release date from changelog.rst file last modification date
 # for reproducible builds
 #
-release_date=`date -u -r CHANGES +%Y-%m-%d`
+release_date=`date -u -r doc/arm/changelog.rst +%Y-%m-%d`
 AC_SUBST([RELEASE_DATE], $release_date)
 
 #
@@ -1414,8 +1364,7 @@ AS_CASE([$with_jemalloc],
 
 AS_IF([test "$with_jemalloc" = "no"],
       [AS_CASE([$host],
-	       [*-freebsd*],[AC_MSG_ERROR([You cannot compile without jemalloc; jemalloc is the system allocator on FreeBSD])])
-       AC_CHECK_FUNCS([malloc_size malloc_usable_size])])
+	       [*-freebsd*],[AC_MSG_ERROR([You cannot compile without jemalloc; jemalloc is the system allocator on FreeBSD])])])
 
 AM_CONDITIONAL([HAVE_JEMALLOC], [test "$with_jemalloc" = "yes"])
 
@@ -1633,6 +1582,35 @@ AS_IF([test -z "$DTRACE"],
 
 AC_SUBST([DTRACE])
 
+#
+# Which should be the default zone database, RBTDB or QPZONE?
+# [pairwise: --with-zonedb=qp, --with-zonedb=rbt]
+#
+AC_ARG_WITH([zonedb],
+	    [AS_HELP_STRING([--with-zonedb=detect],[specify default zone database type (default is "qpzone")])],
+	    [],[with_zonedb=qp])
+zonedb="qpzone"
+AS_CASE([$with_zonedb],
+	[RBT*|rbt*],[zonedb="rbt"],
+        [QP|qp],[],
+	[AC_MSG_ERROR([Unknown zone database type])]
+       )
+AC_DEFINE_UNQUOTED([ZONEDB_DEFAULT], ["$zonedb"], [Default zone database type])
+
+#
+# Which should be the default zone database, RBTDB or QPCACHE?
+# [pairwise: --with-cachedb=qp, --with-cachedb=rbt]
+#
+AC_ARG_WITH([cachedb],
+	    [AS_HELP_STRING([--with-cachedb=detect],[specify default cache database type (default is "qpcache")])],
+	    [],[with_cachedb=qp])
+cachedb="qpcache"
+AS_CASE([$with_cachedb],
+	[RBT*|rbt*],[cachedb="rbt"],
+        [QP*|qp*],[],
+	[AC_MSG_ERROR([Unknown cache database type])]
+       )
+AC_DEFINE_UNQUOTED([CACHEDB_DEFAULT], ["$cachedb"], [Default cache database type])
 
 #
 # Files to configure.  These are listed here because we used to
@@ -1680,7 +1658,6 @@ AC_CONFIG_FILES([tests/Makefile
 		 tests/isc/Makefile
 		 tests/dns/Makefile
 		 tests/ns/Makefile
-		 tests/irs/Makefile
 		 tests/isccfg/Makefile
 		 tests/libtest/Makefile])
 
@@ -1691,7 +1668,16 @@ AC_CONFIG_FILES([tests/unit-test-driver.sh],
 
 AC_CONFIG_FILES([bin/tests/Makefile
 		 bin/tests/system/Makefile
-		 bin/tests/system/conf.sh
+		 bin/tests/system/isctest/vars/.ac_vars/TOP_BUILDDIR
+		 bin/tests/system/isctest/vars/.ac_vars/TOP_SRCDIR
+		 bin/tests/system/isctest/vars/.ac_vars/FSTRM_CAPTURE
+		 bin/tests/system/isctest/vars/.ac_vars/SHELL
+		 bin/tests/system/isctest/vars/.ac_vars/PYTHON
+		 bin/tests/system/isctest/vars/.ac_vars/PERL
+		 bin/tests/system/isctest/vars/.ac_vars/CURL
+		 bin/tests/system/isctest/vars/.ac_vars/NC
+		 bin/tests/system/isctest/vars/.ac_vars/XSLTPROC
+		 bin/tests/system/isctest/vars/.ac_vars/PYTEST
 		 bin/tests/system/dyndb/driver/Makefile
 		 bin/tests/system/dlzexternal/driver/Makefile
 		 bin/tests/system/hooks/driver/Makefile
@@ -1700,8 +1686,6 @@ AC_CONFIG_FILES([bin/tests/Makefile
 
 AC_CONFIG_FILES([bin/tests/system/ifconfig.sh],
 		[chmod +x bin/tests/system/ifconfig.sh])
-AC_CONFIG_FILES([bin/tests/system/legacy.run.sh],
-		[chmod +x bin/tests/system/legacy.run.sh])
 AC_CONFIG_FILES([bin/tests/system/start.sh],
 		[chmod +x bin/tests/system/start.sh])
 AC_CONFIG_FILES([bin/tests/system/stop.sh],
@@ -1734,8 +1718,11 @@ report() {
     if test "yes" = "$with_jemalloc"; then
 	echo "    Memory allocator: jemalloc"
     fi
-    if test "yes" = "$enable_full_report" -o "standard" = "$with_locktype"; then
-	echo "    Mutex lock type: $with_locktype"
+    if test "yes" = "$enable_full_report" -o "rbt" = "$zonedb"; then
+            echo "    Default zone database type: $zonedb"
+    fi
+    if test "yes" = "$enable_full_report" -o "rbt" = "$zonedb"; then
+            echo "    Default cache database type: $cachedb"
     fi
     test "no" = "$enable_dnstap" || \
 	    echo "    Allow 'dnstap' packet logging (--enable-dnstap)"

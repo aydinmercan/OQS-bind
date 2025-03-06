@@ -38,7 +38,7 @@
 void
 ns_server_create(isc_mem_t *mctx, ns_matchview_t matchingview,
 		 ns_server_t **sctxp) {
-	ns_server_t *sctx;
+	ns_server_t *sctx = NULL;
 
 	REQUIRE(sctxp != NULL && *sctxp == NULL);
 
@@ -66,6 +66,7 @@ ns_server_create(isc_mem_t *mctx, ns_matchview_t matchingview,
 	isc_quota_init(&sctx->tcpquota, 10);
 	isc_quota_init(&sctx->recursionquota, 100);
 	isc_quota_init(&sctx->updquota, 100);
+	isc_quota_init(&sctx->sig0checksquota, 1);
 	ISC_LIST_INIT(sctx->http_quotas);
 	isc_mutex_init(&sctx->http_quotas_lock);
 
@@ -134,6 +135,11 @@ ns_server_detach(ns_server_t **sctxp) {
 			isc_mem_put(sctx->mctx, altsecret, sizeof(*altsecret));
 		}
 
+		if (sctx->sig0checksquota_exempt != NULL) {
+			dns_acl_detach(&sctx->sig0checksquota_exempt);
+		}
+
+		isc_quota_destroy(&sctx->sig0checksquota);
 		isc_quota_destroy(&sctx->updquota);
 		isc_quota_destroy(&sctx->recursionquota);
 		isc_quota_destroy(&sctx->tcpquota);
@@ -222,7 +228,7 @@ ns_server_setserverid(ns_server_t *sctx, const char *serverid) {
 		sctx->server_id = isc_mem_strdup(sctx->mctx, serverid);
 	}
 
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 void
@@ -239,7 +245,7 @@ bool
 ns_server_getoption(ns_server_t *sctx, unsigned int option) {
 	REQUIRE(SCTX_VALID(sctx));
 
-	return ((sctx->options & option) != 0);
+	return (sctx->options & option) != 0;
 }
 
 void

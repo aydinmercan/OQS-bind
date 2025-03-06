@@ -65,9 +65,6 @@
 
 #define NS_INTERFACEFLAG_ANYADDR   0x01U /*%< bound to "any" address */
 #define NS_INTERFACEFLAG_LISTENING 0x02U /*%< listening */
-#define MAX_UDP_DISPATCH                           \
-	128 /*%< Maximum number of UDP dispatchers \
-	     *           to start per interface */
 /*% The nameserver interface structure */
 struct ns_interface {
 	unsigned int	   magic; /*%< Magic number. */
@@ -79,6 +76,7 @@ struct ns_interface {
 	char		   name[32];   /*%< Null terminated. */
 	isc_nmsocket_t	  *udplistensocket;
 	isc_nmsocket_t	  *tcplistensocket;
+	isc_nmsocket_t	  *tlslistensocket;
 	isc_nmsocket_t	  *http_listensocket;
 	isc_nmsocket_t	  *http_secure_listensocket;
 	isc_quota_t	  *http_quota;
@@ -90,7 +88,8 @@ struct ns_interface {
 					   *   servicing TCP queries
 					   *   (whether accepting or
 					   *   connected) */
-	ns_clientmgr_t *clientmgr;	  /*%< Client manager. */
+	ns_clientmgr_t	   *clientmgr;	  /*%< Client manager. */
+	isc_nm_proxy_type_t proxy_type;
 	ISC_LINK(ns_interface_t) link;
 };
 
@@ -102,8 +101,7 @@ isc_result_t
 ns_interfacemgr_create(isc_mem_t *mctx, ns_server_t *sctx,
 		       isc_loopmgr_t *loopmgr, isc_nm_t *nm,
 		       dns_dispatchmgr_t     *dispatchmgr,
-		       dns_geoip_databases_t *geoip, bool scan,
-		       ns_interfacemgr_t **mgrp);
+		       dns_geoip_databases_t *geoip, ns_interfacemgr_t **mgrp);
 /*%<
  * Create a new interface manager.
  *
@@ -112,14 +110,28 @@ ns_interfacemgr_create(isc_mem_t *mctx, ns_server_t *sctx,
  * to set nonempty listen-on lists.
  */
 
-void
-ns_interfacemgr_attach(ns_interfacemgr_t *source, ns_interfacemgr_t **target);
-
-void
-ns_interfacemgr_detach(ns_interfacemgr_t **targetp);
+ISC_REFCOUNT_DECL(ns_interfacemgr);
 
 void
 ns_interfacemgr_shutdown(ns_interfacemgr_t *mgr);
+
+void
+ns_interfacemgr_routeconnect(ns_interfacemgr_t *mgr);
+/*%
+ * Connect to the route socket.
+ *
+ * NOTE: This function is idempotent.  Calling it on an ns_interfacemgr_t object
+ * with route socket already connected will do nothing.
+ */
+
+void
+ns_interfacemgr_routedisconnect(ns_interfacemgr_t *mgr);
+/*%
+ * Disconnect the route socket.
+ *
+ * NOTE: This function is idempotent.  Calling it on an ns_interfacemgr_t object
+ * that has no routing socket will do nothing.
+ */
 
 void
 ns_interfacemgr_setbacklog(ns_interfacemgr_t *mgr, int backlog);

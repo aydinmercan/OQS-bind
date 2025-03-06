@@ -53,8 +53,10 @@
 #include <isc/refcount.h>
 
 #include <dns/fixedname.h>
+#include <dns/rdata.h>
 #include <dns/rdataset.h>
 #include <dns/rdatastruct.h> /* for dns_rdata_rrsig_t */
+#include <dns/resolver.h>
 #include <dns/types.h>
 
 #include <dst/dst.h>
@@ -121,6 +123,7 @@ struct dns_validator {
 	bool secure;
 
 	/* Internal validator state */
+	atomic_bool	   canceling;
 	unsigned int	   attributes;
 	dns_fetch_t	  *fetch;
 	dns_validator_t	  *subvalidator;
@@ -144,6 +147,18 @@ struct dns_validator {
 	unsigned int  authcount;
 	unsigned int  authfail;
 	isc_stdtime_t start;
+
+	bool	       digest_sha1;
+	uint8_t	       unsupported_algorithm;
+	uint8_t	       unsupported_digest;
+	dns_rdata_t    rdata;
+	bool	       resume;
+	uint32_t      *nvalidations;
+	uint32_t      *nfails;
+	isc_counter_t *qc;
+	isc_counter_t *gqc;
+
+	dns_edectx_t *edectx;
 };
 
 /*%
@@ -161,7 +176,9 @@ dns_validator_create(dns_view_t *view, dns_name_t *name, dns_rdatatype_t type,
 		     dns_rdataset_t *rdataset, dns_rdataset_t *sigrdataset,
 		     dns_message_t *message, unsigned int options,
 		     isc_loop_t *loop, isc_job_cb cb, void *arg,
-		     dns_validator_t **validatorp);
+		     uint32_t *nvalidations, uint32_t *nfails,
+		     isc_counter_t *qc, isc_counter_t *gqc,
+		     dns_edectx_t *edectx, dns_validator_t **validatorp);
 /*%<
  * Start a DNSSEC validation.
  *
@@ -226,17 +243,17 @@ dns_validator_cancel(dns_validator_t *validator);
  */
 
 void
-dns_validator_destroy(dns_validator_t **validatorp);
+dns_validator_shutdown(dns_validator_t *val);
 /*%<
- * Destroy a DNSSEC validator.
+ * Release the name associated with the DNSSEC validator.
  *
  * Requires:
- *\li	'*validatorp' points to a valid DNSSEC validator.
+ * \li	'val' points to a valid DNSSEC validator.
  * \li	The validator must have completed and sent its completion
  *	event.
  *
  * Ensures:
- *\li	All resources used by the validator are freed.
+ *\li	The name associated with the DNSSEC validator is released.
  */
 
 #if DNS_VALIDATOR_TRACE

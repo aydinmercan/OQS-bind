@@ -23,10 +23,20 @@
 
 typedef void (*isc_job_cb)(void *);
 
-#undef ISC_LOOP_TRACE
+/* Add -DISC_LOOP_TRACE=1 to CFLAGS for detailed reference tracing */
 
 ISC_LANG_BEGINDECLS
 
+/*%<
+ * Returns the current running loop.
+ */
+
+extern thread_local isc_loop_t *isc__loop_local;
+
+static inline isc_loop_t *
+isc_loop(void) {
+	return isc__loop_local;
+}
 void
 isc_loopmgr_create(isc_mem_t *mctx, uint32_t nloops, isc_loopmgr_t **loopmgrp);
 /*%<
@@ -148,16 +158,6 @@ isc_loop_main(isc_loopmgr_t *loopmgr);
  */
 
 isc_loop_t *
-isc_loop_current(isc_loopmgr_t *loopmgr);
-/*%<
- * Returns the loop object from which the function has been called,
- * or NULL if not called from a loop.
- *
- * Requires:
- *\li	'loopmgr' is a valid loop manager.
- */
-
-isc_loop_t *
 isc_loop_get(isc_loopmgr_t *loopmgr, uint32_t tid);
 /*%<
  * Return the loop object associated with the 'tid' threadid
@@ -214,5 +214,15 @@ isc_loop_now(isc_loop_t *loop);
  * Requires:
  *
  * \li 'loop' is a valid loop.
+ */
+
+bool
+isc_loop_shuttingdown(isc_loop_t *loop);
+/*%<
+ * Returns whether the loop is shutting down.
+ *
+ * Requires:
+ *
+ * \li 'loop' is a valid loop and the loop tid matches the current tid.
  */
 ISC_LANG_ENDDECLS

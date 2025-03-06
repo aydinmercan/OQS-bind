@@ -187,6 +187,13 @@ struct dig_lookup {
 		char *tls_key_file;
 		isc_tlsctx_cache_t *tls_ctx_cache;
 	};
+	struct {
+		bool proxy_mode;
+		bool proxy_plain;
+		bool proxy_local;
+		isc_sockaddr_t proxy_src_addr;
+		isc_sockaddr_t proxy_dst_addr;
+	};
 	isc_stdtime_t fuzztime;
 };
 
@@ -259,7 +266,7 @@ extern isc_sockaddr_t localaddr;
 extern char keynametext[MXNAME];
 extern char keyfile[MXNAME];
 extern char keysecret[MXNAME];
-extern dst_algorithm_t hmac;
+extern dst_algorithm_t hmac_alg;
 extern unsigned int digestbits;
 extern dns_tsigkey_t *tsigkey;
 extern bool validated;

@@ -44,12 +44,13 @@ isccfg_duration_fromtext(isc_textregion_t *source,
 	bool not_weeks = false;
 	int i;
 	long long int lli;
+	char *endptr;
 
 	/*
 	 * Copy the buffer as it may not be NULL terminated.
 	 */
 	if (source->length > sizeof(buf) - 1) {
-		return (ISC_R_BADNUMBER);
+		return ISC_R_BADNUMBER;
 	}
 	/* Copy source->length bytes and NULL terminate. */
 	snprintf(buf, sizeof(buf), "%.*s", (int)source->length, source->base);
@@ -64,7 +65,7 @@ isccfg_duration_fromtext(isc_textregion_t *source,
 
 	/* Every duration starts with 'P' */
 	if (toupper((unsigned char)str[0]) != 'P') {
-		return (ISC_R_BADNUMBER);
+		return ISC_R_BADNUMBER;
 	}
 	P = str;
 
@@ -75,9 +76,13 @@ isccfg_duration_fromtext(isc_textregion_t *source,
 	X = strpbrk(str, "Yy");
 	if (X != NULL) {
 		errno = 0;
-		lli = strtoll(str + 1, NULL, 10);
+		endptr = NULL;
+		lli = strtoll(str + 1, &endptr, 10);
+		if (*endptr != *X) {
+			return ISC_R_BADNUMBER;
+		}
 		if (errno != 0 || lli < 0 || lli > UINT32_MAX) {
-			return (ISC_R_BADNUMBER);
+			return ISC_R_BADNUMBER;
 		}
 		duration->parts[0] = (uint32_t)lli;
 		str = X;
@@ -93,9 +98,12 @@ isccfg_duration_fromtext(isc_textregion_t *source,
 	 */
 	if (X != NULL && (T == NULL || (size_t)(X - P) < (size_t)(T - P))) {
 		errno = 0;
-		lli = strtoll(str + 1, NULL, 10);
+		lli = strtoll(str + 1, &endptr, 10);
+		if (*endptr != *X) {
+			return ISC_R_BADNUMBER;
+		}
 		if (errno != 0 || lli < 0 || lli > UINT32_MAX) {
-			return (ISC_R_BADNUMBER);
+			return ISC_R_BADNUMBER;
 		}
 		duration->parts[1] = (uint32_t)lli;
 		str = X;
@@ -106,9 +114,12 @@ isccfg_duration_fromtext(isc_textregion_t *source,
 	X = strpbrk(str, "Dd");
 	if (X != NULL) {
 		errno = 0;
-		lli = strtoll(str + 1, NULL, 10);
+		lli = strtoll(str + 1, &endptr, 10);
+		if (*endptr != *X) {
+			return ISC_R_BADNUMBER;
+		}
 		if (errno != 0 || lli < 0 || lli > UINT32_MAX) {
-			return (ISC_R_BADNUMBER);
+			return ISC_R_BADNUMBER;
 		}
 		duration->parts[3] = (uint32_t)lli;
 		str = X;
@@ -125,9 +136,12 @@ isccfg_duration_fromtext(isc_textregion_t *source,
 	X = strpbrk(str, "Hh");
 	if (X != NULL && T != NULL) {
 		errno = 0;
-		lli = strtoll(str + 1, NULL, 10);
+		lli = strtoll(str + 1, &endptr, 10);
+		if (*endptr != *X) {
+			return ISC_R_BADNUMBER;
+		}
 		if (errno != 0 || lli < 0 || lli > UINT32_MAX) {
-			return (ISC_R_BADNUMBER);
+			return ISC_R_BADNUMBER;
 		}
 		duration->parts[4] = (uint32_t)lli;
 		str = X;
@@ -143,9 +157,12 @@ isccfg_duration_fromtext(isc_textregion_t *source,
 	 */
 	if (X != NULL && T != NULL && (size_t)(X - P) > (size_t)(T - P)) {
 		errno = 0;
-		lli = strtoll(str + 1, NULL, 10);
+		lli = strtoll(str + 1, &endptr, 10);
+		if (*endptr != *X) {
+			return ISC_R_BADNUMBER;
+		}
 		if (errno != 0 || lli < 0 || lli > UINT32_MAX) {
-			return (ISC_R_BADNUMBER);
+			return ISC_R_BADNUMBER;
 		}
 		duration->parts[5] = (uint32_t)lli;
 		str = X;
@@ -156,9 +173,12 @@ isccfg_duration_fromtext(isc_textregion_t *source,
 	X = strpbrk(str, "Ss");
 	if (X != NULL && T != NULL) {
 		errno = 0;
-		lli = strtoll(str + 1, NULL, 10);
+		lli = strtoll(str + 1, &endptr, 10);
+		if (*endptr != *X) {
+			return ISC_R_BADNUMBER;
+		}
 		if (errno != 0 || lli < 0 || lli > UINT32_MAX) {
-			return (ISC_R_BADNUMBER);
+			return ISC_R_BADNUMBER;
 		}
 		duration->parts[6] = (uint32_t)lli;
 		str = X;
@@ -170,12 +190,15 @@ isccfg_duration_fromtext(isc_textregion_t *source,
 	if (W != NULL) {
 		if (not_weeks) {
 			/* Mix of weeks and other indicators is not allowed */
-			return (ISC_R_BADNUMBER);
+			return ISC_R_BADNUMBER;
 		} else {
 			errno = 0;
-			lli = strtoll(str + 1, NULL, 10);
+			lli = strtoll(str + 1, &endptr, 10);
+			if (*endptr != *W) {
+				return ISC_R_BADNUMBER;
+			}
 			if (errno != 0 || lli < 0 || lli > UINT32_MAX) {
-				return (ISC_R_BADNUMBER);
+				return ISC_R_BADNUMBER;
 			}
 			duration->parts[2] = (uint32_t)lli;
 			str = W;
@@ -184,11 +207,11 @@ isccfg_duration_fromtext(isc_textregion_t *source,
 
 	/* Deal with trailing garbage. */
 	if (str[1] != '\0') {
-		return (ISC_R_BADNUMBER);
+		return ISC_R_BADNUMBER;
 	}
 
 	duration->iso8601 = true;
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 isc_result_t
@@ -213,7 +236,7 @@ isccfg_parse_duration(isc_textregion_t *source, isccfg_duration_t *duration) {
 		}
 	}
 
-	return (result);
+	return result;
 }
 
 uint32_t
@@ -234,5 +257,5 @@ isccfg_duration_toseconds(const isccfg_duration_t *duration) {
 	seconds += (uint64_t)duration->parts[1] * 86400 * 31;  /* Months */
 	seconds += (uint64_t)duration->parts[0] * 86400 * 365; /* Years */
 
-	return (seconds > UINT32_MAX ? UINT32_MAX : (uint32_t)seconds);
+	return seconds > UINT32_MAX ? UINT32_MAX : (uint32_t)seconds;
 }

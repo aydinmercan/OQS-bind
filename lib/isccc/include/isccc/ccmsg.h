@@ -45,7 +45,6 @@ typedef struct isccc_ccmsg {
 	/* private (don't touch!) */
 	unsigned int	magic;
 	uint32_t	size;
-	bool		length_received;
 	isc_buffer_t   *buffer;
 	unsigned int	maxsize;
 	isc_mem_t      *mctx;
@@ -54,7 +53,6 @@ typedef struct isccc_ccmsg {
 	void	       *recv_cbarg;
 	isc_nm_cb_t	send_cb;
 	void	       *send_cbarg;
-	bool		reading;
 } isccc_ccmsg_t;
 
 ISC_LANG_BEGINDECLS
@@ -120,18 +118,25 @@ isccc_ccmsg_sendmessage(isccc_ccmsg_t *ccmsg, isc_region_t *region,
  */
 
 void
-isccc_ccmsg_invalidate(isccc_ccmsg_t *ccmsg);
+isccc_ccmsg_disconnect(isccc_ccmsg_t *ccmsg);
 /*%
- * Clean up all allocated state, and invalidate the structure.
+ * Disconnect from the connected netmgr handle associated with a command
+ * channel message.
  *
  * Requires:
  *
- *\li	"ccmsg" be valid.
+ *\li	"ccmsg" to be valid.
+ */
+
+void
+isccc_ccmsg_invalidate(isccc_ccmsg_t *ccmsg);
+/*%
+ * Clean up the magic number and the dynamic buffer associated with a command
+ * channel message.
  *
- * Ensures:
+ * Requires:
  *
- *\li	"ccmsg" is invalidated and disassociated with all memory contexts,
- *	sockets, etc.
+ *\li	"ccmsg" to be valid.
  */
 
 void

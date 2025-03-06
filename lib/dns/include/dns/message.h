@@ -25,10 +25,13 @@
 #include <isc/refcount.h>
 
 #include <dns/compress.h>
+#include <dns/ede.h>
 #include <dns/masterdump.h>
 #include <dns/types.h>
 
 #include <dst/dst.h>
+
+/* Add -DDNS_MESSAGE_TRACE=1 to CFLAGS for detailed reference tracing */
 
 /*! \file dns/message.h
  * \brief Message Handling Module
@@ -101,6 +104,7 @@
 
 /*%< EDNS0 extended OPT codes */
 #define DNS_OPT_LLQ	      1	 /*%< LLQ opt code */
+#define DNS_OPT_UL	      2	 /*%< UL opt code */
 #define DNS_OPT_NSID	      3	 /*%< NSID opt code */
 #define DNS_OPT_CLIENT_SUBNET 8	 /*%< client subnet opt code */
 #define DNS_OPT_EXPIRE	      9	 /*%< EXPIRE opt code */
@@ -116,47 +120,10 @@
 
 /*%<
  * The maximum number of EDNS options we allow to set. Reserve space for the
- * options we know about. Extended DNS Errors may occur multiple times, but we
- * will set only one per message (for now).
+ * options we know about. Extended DNS Errors may occur multiple times, see
+ * DNS_EDE_MAX_ERRORS.
  */
-#define DNS_EDNSOPTIONS 8
-
-/*%< EDNS0 extended DNS errors */
-#define DNS_EDE_OTHER		     0	/*%< Other Error */
-#define DNS_EDE_DNSKEYALG	     1	/*%< Unsupported DNSKEY Algorithm */
-#define DNS_EDE_DSDIGESTTYPE	     2	/*%< Unsupported DS Digest Type */
-#define DNS_EDE_STALEANSWER	     3	/*%< Stale Answer */
-#define DNS_EDE_FORGEDANSWER	     4	/*%< Forged Answer */
-#define DNS_EDE_DNSSECINDETERMINATE  5	/*%< DNSSEC Indeterminate */
-#define DNS_EDE_DNSSECBOGUS	     6	/*%< DNSSEC Bogus */
-#define DNS_EDE_SIGNATUREEXPIRED     7	/*%< Signature Expired */
-#define DNS_EDE_SIGNATURENOTYETVALID 8	/*%< Signature Not Yet Valid */
-#define DNS_EDE_DNSKEYMISSING	     9	/*%< DNSKEY Missing */
-#define DNS_EDE_RRSIGSMISSING	     10 /*%< RRSIGs Missing */
-#define DNS_EDE_NOZONEKEYBITSET	     11 /*%< No Zone Key Bit Set */
-#define DNS_EDE_NSECMISSING	     12 /*%< NSEC Missing */
-#define DNS_EDE_CACHEDERROR	     13 /*%< Cached Error */
-#define DNS_EDE_NOTREADY	     14 /*%< Not Ready */
-#define DNS_EDE_BLOCKED		     15 /*%< Blocked */
-#define DNS_EDE_CENSORED	     16 /*%< Censored */
-#define DNS_EDE_FILTERED	     17 /*%< Filtered */
-#define DNS_EDE_PROHIBITED	     18 /*%< Prohibited */
-#define DNS_EDE_STALENXANSWER	     19 /*%< Stale NXDomain Answer */
-#define DNS_EDE_NOTAUTH		     20 /*%< Not Authoritative */
-#define DNS_EDE_NOTSUPPORTED	     21 /*%< Not Supported */
-#define DNS_EDE_NOREACHABLEAUTH	     22 /*%< No Reachable Authority */
-#define DNS_EDE_NETWORKERROR	     23 /*%< Network Error */
-#define DNS_EDE_INVALIDDATA	     24 /*%< Invalid Data */
-
-/*
- * From RFC 8914:
- * Because long EXTRA-TEXT fields may trigger truncation (which is undesirable
- * given the supplemental nature of EDE), implementers and operators creating
- * EDE options SHOULD avoid lengthy EXTRA-TEXT contents.
- *
- * Following this advice we limit the EXTRA-TEXT length to 64 characters.
- */
-#define DNS_EDE_EXTRATEXT_LEN 64
+#define DNS_EDNSOPTIONS 7 + DNS_EDE_MAX_ERRORS
 
 #define DNS_MESSAGE_REPLYPRESERVE	 (DNS_MESSAGEFLAG_RD | DNS_MESSAGEFLAG_CD)
 #define DNS_MESSAGEEXTFLAG_REPLYPRESERVE (DNS_MESSAGEEXTFLAG_DO)
@@ -201,9 +168,11 @@ typedef int dns_messagetextflag_t;
 /*
  * These tell the message library how the created dns_message_t will be used.
  */
-#define DNS_MESSAGE_INTENTUNKNOWN 0 /*%< internal use only */
-#define DNS_MESSAGE_INTENTPARSE	  1 /*%< parsing messages */
-#define DNS_MESSAGE_INTENTRENDER  2 /*%< rendering */
+typedef enum dns_message_intent {
+	DNS_MESSAGE_INTENTUNKNOWN = 0, /*%< internal use only */
+	DNS_MESSAGE_INTENTPARSE = 1,   /*%< parsing messages */
+	DNS_MESSAGE_INTENTRENDER = 2,  /*%< rendering */
+} dns_message_intent_t;
 
 /*
  * Control behavior of parsing
@@ -250,7 +219,7 @@ typedef struct dns_minttl {
 struct dns_message {
 	/* public from here down */
 	unsigned int   magic;
-	isc_refcount_t refcount;
+	isc_refcount_t references;
 
 	dns_messageid_t	 id;
 	unsigned int	 flags;
@@ -268,21 +237,24 @@ struct dns_message {
 	dns_rdataset_t *sig0;
 	dns_rdataset_t *tsig;
 
-	int	     state;
-	unsigned int from_to_wire     : 2;
-	unsigned int header_ok	      : 1;
-	unsigned int question_ok      : 1;
-	unsigned int tcp_continuation : 1;
-	unsigned int verified_sig     : 1;
-	unsigned int verify_attempted : 1;
-	unsigned int free_query	      : 1;
-	unsigned int free_saved	      : 1;
-	unsigned int cc_ok	      : 1;
-	unsigned int cc_bad	      : 1;
-	unsigned int cc_echoed	      : 1;
-	unsigned int tkey	      : 1;
-	unsigned int rdclass_set      : 1;
-	unsigned int fuzzing	      : 1;
+	int state;
+	unsigned int			      : 0; /* bits */
+	dns_message_intent_t from_to_wire     : 2; /* 2 */
+	unsigned int	     header_ok	      : 1; /* 3 */
+	unsigned int	     question_ok      : 1; /* 4 */
+	unsigned int	     tcp_continuation : 1; /* 5 */
+	unsigned int	     verified_sig     : 1; /* 6 */
+	unsigned int	     verify_attempted : 1; /* 7 */
+	unsigned int	     free_query	      : 1; /* 8 */
+	unsigned int	     free_saved	      : 1; /* 9 */
+	unsigned int	     cc_ok	      : 1; /* 10 */
+	unsigned int	     cc_bad	      : 1; /* 11 */
+	unsigned int	     cc_echoed	      : 1; /* 12 */
+	unsigned int	     tkey	      : 1; /* 13 */
+	unsigned int	     rdclass_set      : 1; /* 14 */
+	unsigned int	     fuzzing	      : 1; /* 15 */
+	unsigned int	     free_pools	      : 1; /* 16 */
+	unsigned int			      : 0;
 
 	unsigned int opt_reserved;
 	unsigned int sig_reserved;
@@ -339,10 +311,12 @@ struct dns_message {
 };
 
 struct dns_ednsopt {
-	uint16_t       code;
-	uint16_t       length;
-	unsigned char *value;
+	uint16_t code;
+	uint16_t length;
+	uint8_t *value;
 };
+
+typedef void (*dns_message_cb_t)(void *arg, isc_result_t result);
 
 /***
  *** Functions
@@ -351,8 +325,9 @@ struct dns_ednsopt {
 ISC_LANG_BEGINDECLS
 
 void
-dns_message_create(isc_mem_t *mctx, unsigned int intent, dns_message_t **msgp);
-
+dns_message_create(isc_mem_t *mctx, isc_mempool_t *namepool,
+		   isc_mempool_t *rdspool, dns_message_intent_t intent,
+		   dns_message_t **msgp);
 /*%<
  * Create msg structure.
  *
@@ -364,20 +339,19 @@ dns_message_create(isc_mem_t *mctx, unsigned int intent, dns_message_t **msgp);
  *
  *\li	'msgp' be non-null and '*msg' be NULL.
  *
+ *\li	'namepool' and 'rdspool' must be either both NULL or both valid
+ *	isc_mempool_t
+ *
  *\li	'intent' must be one of DNS_MESSAGE_INTENTPARSE or
  *	#DNS_MESSAGE_INTENTRENDER.
  *
  * Ensures:
  *\li	The data in "*msg" is set to indicate an unused and empty msg
  *	structure.
- *
- * Returns:
- *\li	#ISC_R_NOMEMORY		-- out of memory
- *\li	#ISC_R_SUCCESS		-- success
  */
 
 void
-dns_message_reset(dns_message_t *msg, unsigned int intent);
+dns_message_reset(dns_message_t *msg, dns_message_intent_t intent);
 /*%<
  * Reset a message structure to default state.  All internal lists are freed
  * or reset to a default state as well.  This is simply a more efficient
@@ -396,24 +370,20 @@ dns_message_reset(dns_message_t *msg, unsigned int intent);
  *\li	'intent' is DNS_MESSAGE_INTENTPARSE or DNS_MESSAGE_INTENTRENDER
  */
 
-void
-dns_message_attach(dns_message_t *source, dns_message_t **target);
-/*%<
- * Attach to message 'source'.
- *
- * Requires:
- *\li	'source' to be a valid message.
- *\li	'target' to be non NULL and '*target' to be NULL.
- */
-
-void
-dns_message_detach(dns_message_t **messagep);
-/*%<
- * Detach *messagep from its message.
- * list.
- *
- * Requires:
- *\li	'*messagep' to be a valid message.
+#if DNS_MESSAGE_TRACE
+#define dns_message_ref(ptr) dns_message__ref(ptr, __func__, __FILE__, __LINE__)
+#define dns_message_unref(ptr) \
+	dns_message__unref(ptr, __func__, __FILE__, __LINE__)
+#define dns_message_attach(ptr, ptrp) \
+	dns_message__attach(ptr, ptrp, __func__, __FILE__, __LINE__)
+#define dns_message_detach(ptrp) \
+	dns_message__detach(ptrp, __func__, __FILE__, __LINE__)
+ISC_REFCOUNT_TRACE_DECL(dns_message);
+#else
+ISC_REFCOUNT_DECL(dns_message);
+#endif
+/*
+ * Reference counting for dns_message
  */
 
 isc_result_t
@@ -597,7 +567,7 @@ dns_message_renderbegin(dns_message_t *msg, dns_compress_t *cctx,
  *
  *\li	'cctx' be valid.
  *
- *\li	'buffer' is a valid buffer.
+ *\li	'buffer' is a valid buffer with length less than 65536.
  *
  * Side Effects:
  *
@@ -856,44 +826,6 @@ dns_message_findtype(const dns_name_t *name, dns_rdatatype_t type,
  *\li	#ISC_R_NOTFOUND		-- the desired type does not exist.
  */
 
-isc_result_t
-dns_message_find(const dns_name_t *name, dns_rdataclass_t rdclass,
-		 dns_rdatatype_t type, dns_rdatatype_t covers,
-		 dns_rdataset_t **rdataset);
-/*%<
- * Search the name for the specified rdclass and type.  If it is found,
- * *rdataset is filled in with a pointer to that rdataset.
- *
- * Requires:
- *\li	if '**rdataset' is non-NULL, *rdataset needs to be NULL.
- *
- *\li	'type' be a valid type, and NOT dns_rdatatype_any.
- *
- *\li	If 'type' is dns_rdatatype_rrsig, 'covers' must be a valid type.
- *	Otherwise it should be 0.
- *
- * Returns:
- *\li	#ISC_R_SUCCESS		-- all is well.
- *\li	#ISC_R_NOTFOUND		-- the desired type does not exist.
- */
-
-void
-dns_message_movename(dns_message_t *msg, dns_name_t *name,
-		     dns_section_t fromsection, dns_section_t tosection);
-/*%<
- * Move a name from one section to another.
- *
- * Requires:
- *
- *\li	'msg' be valid.
- *
- *\li	'name' must be a name already in 'fromsection'.
- *
- *\li	'fromsection' must be a valid section.
- *
- *\li	'tosection' must be a valid section.
- */
-
 void
 dns_message_addname(dns_message_t *msg, dns_name_t *name,
 		    dns_section_t section);
@@ -1127,14 +1059,14 @@ dns_message_getopt(dns_message_t *msg);
 isc_result_t
 dns_message_setopt(dns_message_t *msg, dns_rdataset_t *opt);
 /*%<
- * Set the OPT record for 'msg'.
+ * Set/clear the OPT record for 'msg'.
  *
  * Requires:
  *
  *\li	'msg' is a valid message with rendering intent
  *	and no sections have been rendered.
  *
- *\li	'opt' is a valid OPT record.
+ *\li	'opt' is a valid OPT record or NULL.
  *
  * Ensures:
  *
@@ -1362,24 +1294,23 @@ dns_message_checksig(dns_message_t *msg, dns_view_t *view);
  */
 
 isc_result_t
-dns_message_rechecksig(dns_message_t *msg, dns_view_t *view);
+dns_message_checksig_async(dns_message_t *msg, dns_view_t *view,
+			   isc_loop_t *loop, dns_message_cb_t cb, void *cbarg);
 /*%<
- * Reset the signature state and then if the message was signed,
- * verify the message.
+ * Run dns_message_checksig() in an offloaded thread and return its result
+ * using the 'cb' callback function, running on the 'loop'.
  *
  * Requires:
  *
  *\li	msg is a valid parsed message.
- *\li	view is a valid view or NULL
+ *\li	view is a valid view or NULL.
+ *\li	loop is a valid loop.
+ *\li	cb is a valid callback function.
  *
  * Returns:
  *
- *\li	#ISC_R_SUCCESS		- the message was unsigned, or the message
- *				  was signed correctly.
+ *\li	#DNS_R_WAIT
  *
- *\li	#DNS_R_EXPECTEDTSIG	- A TSIG was expected, but not seen
- *\li	#DNS_R_UNEXPECTEDTSIG	- A TSIG was seen but not expected
- *\li	#DNS_R_TSIGVERIFYFAILURE - The TSIG failed to verify
  */
 
 void
@@ -1546,5 +1477,11 @@ dns_message_response_minttl(dns_message_t *msg, dns_ttl_t *pttl);
  * \li   msg be a valid rendered message;
  * \li   'pttl != NULL'.
  */
+
+void
+dns_message_createpools(isc_mem_t *mctx, isc_mempool_t **namepoolp,
+			isc_mempool_t **rdspoolp);
+void
+dns_message_destroypools(isc_mempool_t **namepoolp, isc_mempool_t **rdspoolp);
 
 ISC_LANG_ENDDECLS

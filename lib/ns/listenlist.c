@@ -31,7 +31,8 @@ static isc_result_t
 listenelt_create(isc_mem_t *mctx, in_port_t port, dns_acl_t *acl,
 		 const uint16_t family, const bool is_http, bool tls,
 		 const ns_listen_tls_params_t *tls_params,
-		 isc_tlsctx_cache_t *tlsctx_cache, ns_listenelt_t **target) {
+		 isc_tlsctx_cache_t *tlsctx_cache, isc_nm_proxy_type_t proxy,
+		 ns_listenelt_t **target) {
 	ns_listenelt_t *elt = NULL;
 	isc_result_t result = ISC_R_SUCCESS;
 	isc_tlsctx_t *sslctx = NULL;
@@ -134,6 +135,11 @@ listenelt_create(isc_mem_t *mctx, in_port_t port, dns_acl_t *acl,
 							  tls_params->ciphers);
 			}
 
+			if (tls_params->cipher_suites != NULL) {
+				isc_tlsctx_set_cipher_suites(
+					sslctx, tls_params->cipher_suites);
+			}
+
 			if (tls_params->prefer_server_ciphers_set) {
 				isc_tlsctx_prefer_server_ciphers(
 					sslctx,
@@ -192,9 +198,10 @@ listenelt_create(isc_mem_t *mctx, in_port_t port, dns_acl_t *acl,
 	elt->http_endpoints_number = 0;
 	elt->http_max_clients = 0;
 	elt->max_concurrent_streams = 0;
+	elt->proxy = proxy;
 
 	*target = elt;
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 tls_error:
 	if (sslctx != NULL) {
 		isc_tlsctx_free(&sslctx);
@@ -203,23 +210,25 @@ tls_error:
 	if (store != NULL && store != found_store) {
 		isc_tls_cert_store_free(&store);
 	}
-	return (result);
+	return result;
 }
 
 isc_result_t
 ns_listenelt_create(isc_mem_t *mctx, in_port_t port, dns_acl_t *acl,
 		    const uint16_t family, bool tls,
 		    const ns_listen_tls_params_t *tls_params,
-		    isc_tlsctx_cache_t *tlsctx_cache, ns_listenelt_t **target) {
+		    isc_tlsctx_cache_t *tlsctx_cache, isc_nm_proxy_type_t proxy,
+		    ns_listenelt_t **target) {
 	return listenelt_create(mctx, port, acl, family, false, tls, tls_params,
-				tlsctx_cache, target);
+				tlsctx_cache, proxy, target);
 }
 
 isc_result_t
 ns_listenelt_create_http(isc_mem_t *mctx, in_port_t http_port, dns_acl_t *acl,
 			 const uint16_t family, bool tls,
 			 const ns_listen_tls_params_t *tls_params,
-			 isc_tlsctx_cache_t *tlsctx_cache, char **endpoints,
+			 isc_tlsctx_cache_t *tlsctx_cache,
+			 isc_nm_proxy_type_t proxy, char **endpoints,
 			 size_t nendpoints, const uint32_t max_clients,
 			 const uint32_t max_streams, ns_listenelt_t **target) {
 	isc_result_t result;
@@ -229,7 +238,7 @@ ns_listenelt_create_http(isc_mem_t *mctx, in_port_t http_port, dns_acl_t *acl,
 	REQUIRE(nendpoints > 0);
 
 	result = listenelt_create(mctx, http_port, acl, family, true, tls,
-				  tls_params, tlsctx_cache, target);
+				  tls_params, tlsctx_cache, proxy, target);
 	if (result == ISC_R_SUCCESS) {
 		(*target)->is_http = true;
 		(*target)->http_endpoints = endpoints;
@@ -250,7 +259,7 @@ ns_listenelt_create_http(isc_mem_t *mctx, in_port_t http_port, dns_acl_t *acl,
 		}
 		isc_mem_free(mctx, endpoints);
 	}
-	return (result);
+	return result;
 }
 
 void
@@ -284,7 +293,7 @@ ns_listenlist_create(isc_mem_t *mctx, ns_listenlist_t **target) {
 	list->refcount = 1;
 	ISC_LIST_INIT(list->elts);
 	*target = list;
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static void
@@ -334,7 +343,7 @@ ns_listenlist_default(isc_mem_t *mctx, in_port_t port, bool enabled,
 	}
 
 	result = ns_listenelt_create(mctx, port, acl, family, false, NULL, NULL,
-				     &elt);
+				     ISC_NM_PROXY_NONE, &elt);
 	if (result != ISC_R_SUCCESS) {
 		goto cleanup_acl;
 	}
@@ -347,12 +356,12 @@ ns_listenlist_default(isc_mem_t *mctx, in_port_t port, bool enabled,
 	ISC_LIST_APPEND(list->elts, elt, link);
 
 	*target = list;
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 
 cleanup_listenelt:
 	ns_listenelt_destroy(elt);
 cleanup_acl:
 	dns_acl_detach(&acl);
 cleanup:
-	return (result);
+	return result;
 }

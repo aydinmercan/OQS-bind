@@ -47,13 +47,13 @@
 ***** Imports
 *****/
 
-/* Define to 1 for detailed reference tracing */
-#undef DNS_DB_TRACE
+/* Add -DDNS_DB_TRACE=1 to CFLAGS for detailed reference tracing */
 
 #include <inttypes.h>
 #include <stdbool.h>
 
 #include <isc/lang.h>
+#include <isc/loop.h>
 #include <isc/magic.h>
 #include <isc/rwlock.h>
 #include <isc/stats.h>
@@ -148,8 +148,9 @@ typedef struct dns_dbmethods {
 				      dns_dbnode_t **nodep DNS__DB_FLARG);
 	isc_result_t (*setsigningtime)(dns_db_t *db, dns_rdataset_t *rdataset,
 				       isc_stdtime_t resign);
-	isc_result_t (*getsigningtime)(dns_db_t *db, dns_rdataset_t *rdataset,
-				       dns_name_t *name DNS__DB_FLARG);
+	isc_result_t (*getsigningtime)(dns_db_t *db, isc_stdtime_t *resign,
+				       dns_name_t     *name,
+				       dns_typepair_t *typepair);
 	dns_stats_t *(*getrrsetstats)(dns_db_t *db);
 	isc_result_t (*findnodeext)(dns_db_t *db, const dns_name_t *name,
 				    bool		     create,
@@ -180,6 +181,10 @@ typedef struct dns_dbmethods {
 				dns_rdataset_t *rdataset, dns_message_t *msg);
 	void (*expiredata)(dns_db_t *db, dns_dbnode_t *node, void *data);
 	void (*deletedata)(dns_db_t *db, dns_dbnode_t *node, void *data);
+	isc_result_t (*nodefullname)(dns_db_t *db, dns_dbnode_t *node,
+				     dns_name_t *name);
+	void (*setmaxrrperset)(dns_db_t *db, uint32_t value);
+	void (*setmaxtypepername)(dns_db_t *db, uint32_t value);
 } dns_dbmethods_t;
 
 typedef isc_result_t (*dns_dbcreatefunc_t)(isc_mem_t	    *mctx,
@@ -227,6 +232,17 @@ struct dns_dbonupdatelistener {
 	void		       *onupdate_arg;
 	struct cds_lfht_node	ht_node;
 	struct rcu_head		rcu_head;
+};
+
+/*%
+ * Used in composite databases such as RBTDB to indicate whether a node
+ * exists in a specal tree for NSEC or NSEC3.
+ */
+enum {
+	DNS_DB_NSEC_NORMAL = 0,	  /* in main tree */
+	DNS_DB_NSEC_HAS_NSEC = 1, /* also has node in nsec tree */
+	DNS_DB_NSEC_NSEC = 2,	  /* in nsec tree */
+	DNS_DB_NSEC_NSEC3 = 3	  /* in nsec3 tree */
 };
 
 /*@{*/
@@ -1064,20 +1080,26 @@ isc_result_t
 dns_db_createiterator(dns_db_t *db, unsigned int options,
 		      dns_dbiterator_t **iteratorp);
 /*%<
- * Create an iterator for version 'version' of 'db'.
+ * Create an iterator for 'db'.
  *
  * Notes:
  *
- * \li	One or more of the following options can be set.
+ * \li	One or more of the following options can be set:
+ *
  *	#DNS_DB_RELATIVENAMES
  *	#DNS_DB_NSEC3ONLY
  *	#DNS_DB_NONSEC3
+ *
+ *	(Note that it is not mandatory to implement these flags;
+ *	some databases will ignore them.)
  *
  * Requires:
  *
  * \li	'db' is a valid database.
  *
  * \li	iteratorp != NULL && *iteratorp == NULL
+ *
+ * \li	'flags' contains at most one of #DNS_DB_NSEC3ONLY and #DNS_DB_NONSEC3.
  *
  * Ensures:
  *
@@ -1571,19 +1593,19 @@ dns_db_setsigningtime(dns_db_t *db, dns_rdataset_t *rdataset,
  * \li	#ISC_R_NOTIMPLEMENTED - Not supported by this DB implementation.
  */
 
-#define dns_db_getsigningtime(db, rdataset, name) \
-	dns__db_getsigningtime(db, rdataset, name DNS__DB_FILELINE)
 isc_result_t
-dns__db_getsigningtime(dns_db_t *db, dns_rdataset_t *rdataset,
-		       dns_name_t *name DNS__DB_FLARG);
+dns_db_getsigningtime(dns_db_t *db, isc_stdtime_t *resign,
+		      dns_name_t *foundname, dns_typepair_t *typepair);
 /*%<
- * Return the rdataset with the earliest signing time in the zone.
- * Note: the rdataset is version agnostic.
+ * Find the rdataset header with the earliest signing time in a zone
+ * database. Update 'foundname' and 'typepair' with its name and
+ * type, and update 'resign' with the time at which it is to be signed.
  *
  * Requires:
  * \li	'db' is a valid zone database.
- * \li	'rdataset' to be initialized but not associated.
- * \li	'name' to be NULL or have a buffer associated with it.
+ * \li	'resign' is not NULL.
+ * \li	'foundname' is not NULL.
+ * \li	'typepair' is not NULL.
  *
  * Returns:
  * \li	#ISC_R_SUCCESS
@@ -1770,6 +1792,33 @@ dns_db_deletedata(dns_db_t *db, dns_dbnode_t *node, void *data);
  * data from an LRU list or a heap.
  */
 
+isc_result_t
+dns_db_nodefullname(dns_db_t *db, dns_dbnode_t *node, dns_name_t *name);
+/*%<
+ * Get the name associated with a database node.
+ *
+ * Requires:
+ *
+ * \li 'db' is a valid database
+ * \li 'node' and 'name' are not NULL
+ */
+
 void
-dns_db_expiredata(dns_db_t *db, dns_dbnode_t *node, void *data);
+dns_db_setmaxrrperset(dns_db_t *db, uint32_t value);
+/*%<
+ * Set the maximum permissible number of RRs per RRset.
+ *
+ * If 'value' is nonzero, then any subsequent attempt to add an rdataset
+ * with more than 'value' RRs will return ISC_R_TOOMANYRECORDS.
+ */
+
+void
+dns_db_setmaxtypepername(dns_db_t *db, uint32_t value);
+/*%<
+ * Set the maximum permissible number of RR types per owner name.
+ *
+ * If 'value' is nonzero, and if there are already 'value' RR types
+ * stored at a given node, then any subsequent attempt to add an rdataset
+ * with a new RR type will return ISC_R_TOOMANYRECORDS.
+ */
 ISC_LANG_ENDDECLS

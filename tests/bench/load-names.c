@@ -63,7 +63,7 @@ static size_t
 item_makekey(dns_qpkey_t key, void *ctx, void *pval, uint32_t ival) {
 	UNUSED(ctx);
 	assert(pval == &item[ival]);
-	return (dns_qpkey_fromname(key, &item[ival].fixed.name));
+	return dns_qpkey_fromname(key, &item[ival].fixed.name);
 }
 
 static void
@@ -87,7 +87,7 @@ const dns_qpmethods_t qpmethods = {
 			dns_name_format(name, buf, sizeof(buf));    \
 			fprintf(stderr, "%s: %s\n", buf,            \
 				isc_result_totext(result));         \
-			exit(1);                                    \
+			exit(EXIT_FAILURE);                         \
 		}                                                   \
 	} while (0)
 
@@ -105,7 +105,7 @@ static void *
 new_lfht(isc_mem_t *mem ISC_ATTR_UNUSED) {
 	struct cds_lfht *lfht = cds_lfht_new(
 		1, 1, 0, CDS_LFHT_AUTO_RESIZE | CDS_LFHT_ACCOUNTING, NULL);
-	return (lfht);
+	return lfht;
 }
 
 static int
@@ -114,7 +114,7 @@ lfht_match(struct cds_lfht_node *ht_node, const void *_key) {
 						  ht_node);
 	const dns_name_t *key = _key;
 
-	return (dns_name_equal(key, &i->fixed.name));
+	return dns_name_equal(key, &i->fixed.name);
 }
 
 static isc_result_t
@@ -126,10 +126,10 @@ add_lfht(void *lfht, size_t count) {
 		&item[count].ht_node);
 
 	if (ht_node != &item[count].ht_node) {
-		return (ISC_R_EXISTS);
+		return ISC_R_EXISTS;
 	}
 
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static isc_result_t
@@ -141,11 +141,11 @@ get_lfht(void *lfht, size_t count, void **pval) {
 
 	struct cds_lfht_node *ht_node = cds_lfht_iter_get_node(&iter);
 	if (ht_node == NULL) {
-		return (ISC_R_NOTFOUND);
+		return ISC_R_NOTFOUND;
 	}
 
 	*pval = caa_container_of(ht_node, struct item_s, ht_node);
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static void *
@@ -173,7 +173,7 @@ thread_lfht(void *arg0) {
 	arg->d0 = isc_time_microdiff(&t1, &t0);
 	arg->d1 = isc_time_microdiff(&t2, &t1);
 
-	return (NULL);
+	return NULL;
 }
 
 /*
@@ -183,25 +183,31 @@ thread_lfht(void *arg0) {
 static void *
 new_hashmap(isc_mem_t *mem) {
 	isc_hashmap_t *hashmap = NULL;
-	isc_hashmap_create(mem, 1, 0, &hashmap);
+	isc_hashmap_create(mem, 1, &hashmap);
 
-	return (hashmap);
+	return hashmap;
+}
+
+static bool
+name_match(void *node, const void *key) {
+	const struct item_s *i = node;
+	return dns_name_equal(&i->fixed.name, key);
 }
 
 static isc_result_t
 add_hashmap(void *hashmap, size_t count) {
-	isc_result_t result =
-		isc_hashmap_add(hashmap, NULL, item[count].fixed.name.ndata,
-				item[count].fixed.name.length, &item[count]);
-	return (result);
+	isc_result_t result = isc_hashmap_add(
+		hashmap, dns_name_hash(&item[count].fixed.name), name_match,
+		&item[count].fixed.name, &item[count], NULL);
+	return result;
 }
 
 static isc_result_t
 get_hashmap(void *hashmap, size_t count, void **pval) {
-	isc_result_t result =
-		isc_hashmap_find(hashmap, NULL, item[count].fixed.name.ndata,
-				 item[count].fixed.name.length, pval);
-	return (result);
+	isc_result_t result = isc_hashmap_find(
+		hashmap, dns_name_hash(&item[count].fixed.name), name_match,
+		&item[count].fixed.name, pval);
+	return result;
 }
 
 static void *
@@ -232,7 +238,7 @@ thread_hashmap(void *arg0) {
 	arg->d0 = isc_time_microdiff(&t1, &t0);
 	arg->d1 = isc_time_microdiff(&t2, &t1);
 
-	return (NULL);
+	return NULL;
 }
 
 /*
@@ -243,7 +249,7 @@ static void *
 new_ht(isc_mem_t *mem) {
 	isc_ht_t *ht = NULL;
 	isc_ht_init(&ht, mem, 1, 0);
-	return (ht);
+	return ht;
 }
 
 static isc_result_t
@@ -251,14 +257,14 @@ add_ht(void *ht, size_t count) {
 	isc_result_t result = isc_ht_add(ht, item[count].fixed.name.ndata,
 					 item[count].fixed.name.length,
 					 &item[count]);
-	return (result);
+	return result;
 }
 
 static isc_result_t
 get_ht(void *ht, size_t count, void **pval) {
 	isc_result_t result = isc_ht_find(ht, item[count].fixed.name.ndata,
 					  item[count].fixed.name.length, pval);
-	return (result);
+	return result;
 }
 
 static void *
@@ -289,7 +295,7 @@ thread_ht(void *arg0) {
 	arg->d0 = isc_time_microdiff(&t1, &t0);
 	arg->d1 = isc_time_microdiff(&t2, &t1);
 
-	return (NULL);
+	return NULL;
 }
 
 /*
@@ -300,21 +306,36 @@ static void *
 new_rbt(isc_mem_t *mem) {
 	dns_rbt_t *rbt = NULL;
 	(void)dns_rbt_create(mem, NULL, NULL, &rbt);
-	return (rbt);
+	return rbt;
 }
 
 static isc_result_t
 add_rbt(void *rbt, size_t count) {
-	isc_result_t result = dns_rbt_addname(rbt, &item[count].fixed.name,
-					      &item[count]);
-	return (result);
+	isc_result_t result;
+	dns_rbtnode_t *node = NULL;
+
+	result = dns_rbt_addnode(rbt, &item[count].fixed.name, &node);
+	if (result == ISC_R_SUCCESS ||
+	    (result == ISC_R_EXISTS && node->data == NULL))
+	{
+		node->data = &item[count];
+		result = ISC_R_SUCCESS;
+	}
+
+	return result;
 }
 
 static isc_result_t
 get_rbt(void *rbt, size_t count, void **pval) {
-	isc_result_t result = dns_rbt_findname(rbt, &item[count].fixed.name, 0,
-					       NULL, pval);
-	return (result);
+	isc_result_t result;
+	dns_rbtnode_t *node = NULL;
+
+	result = dns_rbt_findnode(rbt, &item[count].fixed.name, NULL, &node,
+				  NULL, 0, NULL, NULL);
+	if (result == ISC_R_SUCCESS) {
+		*pval = node->data;
+	}
+	return result;
 }
 
 static void *
@@ -346,7 +367,7 @@ thread_rbt(void *arg0) {
 	arg->d0 = isc_time_microdiff(&t1, &t0);
 	arg->d1 = isc_time_microdiff(&t2, &t1);
 
-	return (NULL);
+	return NULL;
 }
 
 /*
@@ -357,23 +378,23 @@ static void *
 new_qp(isc_mem_t *mem) {
 	dns_qpmulti_t *qpmulti = NULL;
 	dns_qpmulti_create(mem, &qpmethods, NULL, &qpmulti);
-	return (qpmulti);
+	return qpmulti;
 }
 
 static isc_result_t
 add_qp(void *qp, size_t count) {
 	isc_result_t result = dns_qp_insert(qp, &item[count], count);
-	return (result);
+	return result;
 }
 
 static void
 sqz_qp(void *qp) {
-	dns_qp_compact(qp, DNS_QPGC_ALL);
+	dns_qp_compact(qp, DNS_QPGC_MAYBE);
 }
 
 static isc_result_t
 get_qp(void *qp, size_t count, void **pval) {
-	return (dns_qp_getname(qp, &item[count].fixed.name, pval, NULL));
+	return dns_qp_getname(qp, &item[count].fixed.name, pval, NULL);
 }
 
 static void *
@@ -417,22 +438,22 @@ _thread_qp(void *arg0, bool sqz, bool brr) {
 	arg->d0 = isc_time_microdiff(&t1, &t0);
 	arg->d1 = isc_time_microdiff(&t2, &t1);
 
-	return (NULL);
+	return NULL;
 }
 
 static void *
 thread_qp(void *arg0) {
-	return (_thread_qp(arg0, true, false));
+	return _thread_qp(arg0, true, false);
 }
 
 static void *
 thread_qp_nosqz(void *arg0) {
-	return (_thread_qp(arg0, false, false));
+	return _thread_qp(arg0, false, false);
 }
 
 static void *
 thread_qp_brr(void *arg0) {
-	return (_thread_qp(arg0, true, true));
+	return _thread_qp(arg0, true, true);
 }
 
 /*
@@ -453,7 +474,7 @@ static struct fun fun_list[] = {
 	do {                                                                   \
 		if (!(check)) {                                                \
 			fprintf(stderr, "%s:%zu: %s\n", filename, lines, msg); \
-			exit(1);                                               \
+			exit(EXIT_FAILURE);                                    \
 		}                                                              \
 	} while (0)
 
@@ -474,7 +495,7 @@ main(int argc, char *argv[]) {
 	if (argc != 2) {
 		fprintf(stderr,
 			"usage: load-names <filename.csv> <nthreads>\n");
-		exit(1);
+		exit(EXIT_FAILURE);
 	}
 
 	filename = argv[1];
@@ -482,7 +503,7 @@ main(int argc, char *argv[]) {
 	if (result != ISC_R_SUCCESS) {
 		fprintf(stderr, "stat(%s): %s\n", filename,
 			isc_result_totext(result));
-		exit(1);
+		exit(EXIT_FAILURE);
 	}
 	filesize = (size_t)fileoff;
 
@@ -490,7 +511,7 @@ main(int argc, char *argv[]) {
 	fp = fopen(filename, "r");
 	if (fp == NULL || fread(filetext, 1, filesize, fp) < filesize) {
 		fprintf(stderr, "read(%s): %s\n", filename, strerror(errno));
-		exit(1);
+		exit(EXIT_FAILURE);
 	}
 	fclose(fp);
 	filetext[filesize] = '\0';
@@ -545,9 +566,9 @@ main(int argc, char *argv[]) {
 			void *map = NULL;
 
 			isc_mem_create(&mem);
-			map = fun->new (mem);
+			map = fun->new(mem);
 
-			size_t nitems = ARRAY_SIZE(item) / (nthreads + 1);
+			size_t nitems = lines / (nthreads + 1);
 
 			isc_barrier_init(&barrier, nthreads);
 

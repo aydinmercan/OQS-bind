@@ -51,9 +51,7 @@
 #endif /* ifdef HAVE_LIBSCF */
 
 static char *pidfile = NULL;
-static char *lockfile = NULL;
 static int devnullfd = -1;
-static int singletonfd = -1;
 
 #ifndef ISC_FACILITY
 #define ISC_FACILITY LOG_DAEMON
@@ -62,6 +60,9 @@ static int singletonfd = -1;
 static struct passwd *runas_pw = NULL;
 static bool done_setuid = false;
 static int dfd[2] = { -1, -1 };
+
+static uid_t saved_uid = (uid_t)-1;
+static gid_t saved_gid = (gid_t)-1;
 
 #if HAVE_LIBCAP
 
@@ -251,115 +252,6 @@ linux_keepcaps(void) {
 
 #endif /* HAVE_LIBCAP */
 
-/*
- * First define compatibility shims if {set,get}res{uid,gid} are not available
- */
-
-#if !HAVE_GETRESGID
-static int
-getresgid(gid_t *rgid, gid_t *egid, gid_t *sgid) {
-	*rgid = -1;
-	*egid = getegid();
-	*sgid = -1;
-
-	return (0);
-}
-#endif /* !HAVE_GETRESGID */
-
-#if !HAVE_SETRESGID
-static int
-setresgid(gid_t rgid, gid_t egid, gid_t sgid) {
-	REQUIRE(rgid == (gid_t)-1);
-	REQUIRE(sgid == (gid_t)-1);
-
-#if HAVE_SETREGID
-	return (setregid(rgid, egid));
-#else  /* HAVE_SETREGID */
-	return (setegid(egid));
-#endif /* HAVE_SETREGID */
-}
-#endif /* !HAVE_SETRESGID */
-
-#if !HAVE_GETRESUID
-static int
-getresuid(uid_t *ruid, uid_t *euid, uid_t *suid) {
-	*ruid = -1;
-	*euid = geteuid();
-	*suid = -1;
-
-	return (0);
-}
-#endif /* !HAVE_GETRESUID */
-
-#if !HAVE_SETRESUID
-static int
-setresuid(uid_t ruid, uid_t euid, uid_t suid) {
-	REQUIRE(ruid == (uid_t)-1);
-	REQUIRE(suid == (uid_t)-1);
-
-#if HAVE_SETREGID
-	return (setregid(ruid, euid));
-#else  /* HAVE_SETREGID */
-	return (setegid(euid));
-#endif /* HAVE_SETREGID */
-}
-#endif /* !HAVE_SETRESUID */
-
-static int
-set_effective_gid(gid_t gid) {
-	gid_t oldgid;
-
-	if (getresgid(&(gid_t){ 0 }, &oldgid, &(gid_t){ 0 }) == -1) {
-		return (-1);
-	}
-
-	if (oldgid == gid) {
-		return (0);
-	}
-
-	if (setresgid(-1, gid, -1) == -1) {
-		return (-1);
-	}
-
-	if (getresgid(&(gid_t){ 0 }, &oldgid, &(gid_t){ 0 }) == -1) {
-		return (-1);
-	}
-
-	if (oldgid != gid) {
-		return (-1);
-	}
-
-	return (0);
-}
-
-static int
-set_effective_uid(uid_t uid) {
-	uid_t olduid;
-
-	if (getresuid(&(uid_t){ 0 }, &olduid, &(uid_t){ 0 }) == -1) {
-		return (-1);
-	}
-
-	if (olduid == uid) {
-		return (0);
-	}
-
-	if (setresuid(-1, uid, -1) == -1) {
-		return (-1);
-	}
-
-	if (getresuid(&(uid_t){ 0 }, &olduid, &(uid_t){ 0 }) == -1) {
-		return (-1);
-	}
-
-	if (olduid != uid) {
-		return (-1);
-	}
-
-	/* Success */
-	return (0);
-}
-
 static void
 setperms(uid_t uid, gid_t gid) {
 	char strbuf[ISC_STRERRORSIZE];
@@ -368,13 +260,13 @@ setperms(uid_t uid, gid_t gid) {
 	 * Drop the gid privilege first, because in some cases the gid privilege
 	 * cannot be dropped after the uid privilege has been dropped.
 	 */
-	if (set_effective_gid(gid) == -1) {
+	if (setegid(gid) == -1) {
 		strerror_r(errno, strbuf, sizeof(strbuf));
 		named_main_earlywarning("unable to set effective gid to %d: %s",
 					gid, strbuf);
 	}
 
-	if (set_effective_uid(uid) == -1) {
+	if (seteuid(uid) == -1) {
 		strerror_r(errno, strbuf, sizeof(strbuf));
 		named_main_earlywarning("unable to set effective uid to %d: %s",
 					uid, strbuf);
@@ -430,10 +322,10 @@ named_os_daemonize(void) {
 			char buf;
 			n = read(dfd[0], &buf, 1);
 			if (n == 1) {
-				_exit(0);
+				_exit(EXIT_SUCCESS);
 			}
 		} while (n == -1 && errno == EINTR);
-		_exit(1);
+		_exit(EXIT_FAILURE);
 	}
 	(void)close(dfd[0]);
 
@@ -508,15 +400,15 @@ named_os_closedevnull(void) {
 static bool
 all_digits(const char *s) {
 	if (*s == '\0') {
-		return (false);
+		return false;
 	}
 	while (*s != '\0') {
 		if (!isdigit((unsigned char)(*s))) {
-			return (false);
+			return false;
 		}
 		s++;
 	}
-	return (true);
+	return true;
 }
 
 void
@@ -572,20 +464,41 @@ named_os_inituserinfo(const char *username) {
 }
 
 void
-named_os_changeuser(void) {
+named_os_restoreuser(void) {
+	if (runas_pw == NULL || done_setuid) {
+		return;
+	}
+
+	REQUIRE(saved_uid != (uid_t)-1);
+	REQUIRE(saved_gid != (gid_t)-1);
+
+	setperms(saved_uid, saved_gid);
+}
+
+void
+named_os_changeuser(bool permanent) {
 	char strbuf[ISC_STRERRORSIZE];
 	if (runas_pw == NULL || done_setuid) {
 		return;
 	}
 
+	if (!permanent) {
+		saved_uid = getuid();
+		saved_gid = getgid();
+
+		setperms(runas_pw->pw_uid, runas_pw->pw_gid);
+
+		return;
+	}
+
 	done_setuid = true;
 
-	if (setgid(runas_pw->pw_gid) < 0) {
+	if (setgid(runas_pw->pw_gid) == -1) {
 		strerror_r(errno, strbuf, sizeof(strbuf));
 		named_main_earlyfatal("setgid(): %s", strbuf);
 	}
 
-	if (setuid(runas_pw->pw_uid) < 0) {
+	if (setuid(runas_pw->pw_uid) == -1) {
 		strerror_r(errno, strbuf, sizeof(strbuf));
 		named_main_earlyfatal("setuid(): %s", strbuf);
 	}
@@ -606,11 +519,11 @@ named_os_changeuser(void) {
 }
 
 uid_t
-ns_os_uid(void) {
+named_os_uid(void) {
 	if (runas_pw == NULL) {
-		return (0);
+		return 0;
 	}
-	return (runas_pw->pw_uid);
+	return runas_pw->pw_uid;
 }
 
 void
@@ -662,7 +575,7 @@ void
 named_os_minprivs(void) {
 #if HAVE_LIBCAP
 	linux_keepcaps();
-	named_os_changeuser();
+	named_os_changeuser(true);
 	linux_minprivs();
 #endif /* HAVE_LIBCAP */
 }
@@ -674,22 +587,22 @@ safe_open(const char *filename, mode_t mode, bool append) {
 
 	if (stat(filename, &sb) == -1) {
 		if (errno != ENOENT) {
-			return (-1);
+			return -1;
 		}
 	} else if ((sb.st_mode & S_IFREG) == 0) {
 		errno = EOPNOTSUPP;
-		return (-1);
+		return -1;
 	}
 
 	if (append) {
 		fd = open(filename, O_WRONLY | O_CREAT | O_APPEND, mode);
 	} else {
 		if (unlink(filename) < 0 && errno != ENOENT) {
-			return (-1);
+			return -1;
 		}
 		fd = open(filename, O_WRONLY | O_CREAT | O_EXCL, mode);
 	}
-	return (fd);
+	return fd;
 }
 
 static void
@@ -703,24 +616,6 @@ cleanup_pidfile(void) {
 		free(pidfile);
 	}
 	pidfile = NULL;
-}
-
-static void
-cleanup_lockfile(void) {
-	if (singletonfd != -1) {
-		close(singletonfd);
-		singletonfd = -1;
-	}
-
-	if (lockfile != NULL) {
-		int n = unlink(lockfile);
-		if (n == -1 && errno != ENOENT) {
-			named_main_earlywarning("unlink '%s': failed",
-						lockfile);
-		}
-		free(lockfile);
-		lockfile = NULL;
-	}
 }
 
 /*
@@ -755,7 +650,7 @@ mkdirpath(char *filename, void (*report)(const char *, ...)) {
 			    !strcmp(slash + 1, ".."))
 			{
 				*slash = '/';
-				return (0);
+				return 0;
 			}
 			mode = S_IRUSR | S_IWUSR | S_IXUSR; /* u=rwx */
 			mode |= S_IRGRP | S_IXGRP;	    /* g=rx */
@@ -777,11 +672,11 @@ mkdirpath(char *filename, void (*report)(const char *, ...)) {
 		}
 		*slash = '/';
 	}
-	return (0);
+	return 0;
 
 error:
 	*slash = '/';
-	return (-1);
+	return -1;
 }
 
 FILE *
@@ -798,28 +693,25 @@ named_os_openfile(const char *filename, mode_t mode, bool switch_user) {
 		strerror_r(errno, strbuf, sizeof(strbuf));
 		named_main_earlywarning("couldn't strdup() '%s': %s", filename,
 					strbuf);
-		return (NULL);
+		return NULL;
 	}
 	if (mkdirpath(f, named_main_earlywarning) == -1) {
 		free(f);
-		return (NULL);
+		return NULL;
 	}
 	free(f);
 
 	if (switch_user && runas_pw != NULL) {
-		uid_t olduid = getuid();
-		gid_t oldgid = getgid();
-
 		/*
-		 * Set UID/GID to the one we'll be running with
+		 * Temporarily set UID/GID to the one we'll be running with
 		 * eventually.
 		 */
-		setperms(runas_pw->pw_uid, runas_pw->pw_gid);
+		named_os_changeuser(false);
 
 		fd = safe_open(filename, mode, false);
 
 		/* Restore UID/GID to previous uid/gid */
-		setperms(olduid, oldgid);
+		named_os_restoreuser();
 
 		if (fd == -1) {
 			fd = safe_open(filename, mode, false);
@@ -845,7 +737,7 @@ named_os_openfile(const char *filename, mode_t mode, bool switch_user) {
 		strerror_r(errno, strbuf, sizeof(strbuf));
 		named_main_earlywarning("could not open file '%s': %s",
 					filename, strbuf);
-		return (NULL);
+		return NULL;
 	}
 
 	fp = fdopen(fd, "w");
@@ -855,7 +747,7 @@ named_os_openfile(const char *filename, mode_t mode, bool switch_user) {
 					filename, strbuf);
 	}
 
-	return (fp);
+	return fp;
 }
 
 void
@@ -906,69 +798,10 @@ named_os_writepidfile(const char *filename, bool first_time) {
 	(void)fclose(fh);
 }
 
-bool
-named_os_issingleton(const char *filename) {
-	char strbuf[ISC_STRERRORSIZE];
-	struct flock lock;
-
-	if (singletonfd != -1) {
-		return (true);
-	}
-
-	if (strcasecmp(filename, "none") == 0) {
-		return (true);
-	}
-
-	/*
-	 * Make the containing directory if it doesn't exist.
-	 */
-	lockfile = strdup(filename);
-	if (lockfile == NULL) {
-		strerror_r(errno, strbuf, sizeof(strbuf));
-		named_main_earlyfatal("couldn't allocate memory for '%s': %s",
-				      filename, strbuf);
-	} else {
-		int ret = mkdirpath(lockfile, named_main_earlywarning);
-		if (ret == -1) {
-			named_main_earlywarning("couldn't create '%s'",
-						filename);
-			cleanup_lockfile();
-			return (false);
-		}
-	}
-
-	/*
-	 * named_os_openfile() uses safeopen() which removes any existing
-	 * files. We can't use that here.
-	 */
-	singletonfd = open(filename, O_WRONLY | O_CREAT,
-			   S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-	if (singletonfd == -1) {
-		cleanup_lockfile();
-		return (false);
-	}
-
-	memset(&lock, 0, sizeof(lock));
-	lock.l_type = F_WRLCK;
-	lock.l_whence = SEEK_SET;
-	lock.l_start = 0;
-	lock.l_len = 1;
-
-	/* Non-blocking (does not wait for lock) */
-	if (fcntl(singletonfd, F_SETLK, &lock) == -1) {
-		close(singletonfd);
-		singletonfd = -1;
-		return (false);
-	}
-
-	return (true);
-}
-
 void
 named_os_shutdown(void) {
 	closelog();
 	cleanup_pidfile();
-	cleanup_lockfile();
 }
 
 void
@@ -1030,5 +863,5 @@ named_os_uname(void) {
 	if (unamep == NULL) {
 		getuname();
 	}
-	return (unamep);
+	return unamep;
 }

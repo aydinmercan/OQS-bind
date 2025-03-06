@@ -507,6 +507,44 @@ abbreviation is unambiguous; for example, :option:`+cd` is equivalent to
    mandatory. Responses to padded queries may also be padded, but only
    if the query uses TCP or DNS COOKIE.
 
+.. option:: +proxy[=src_addr[#src_port]-dst_addr[#dst_port]], +noproxy
+
+   When this option is set, :program:`dig` adds PROXYv2 headers to the
+   queries. When source and destination addresses are specified, the
+   headers contain them and use the ``PROXY`` command. It means for
+   the remote peer that the queries were sent on behalf of another
+   node and that the PROXYv2 header reflects the original connection
+   endpoints. The default source port is ``0`` and destination port is
+   `53`.
+
+   For encrypted DNS transports, to prevent accidental information
+   leakage, encryption is applied to the PROXYv2 headers: the headers
+   are sent right after the handshake process has been completed.
+
+   For plain DNS transports, no encryption is applied to the PROXYv2
+   headers.
+
+   If the addressees are omitted, PROXYv2 headers, that use the
+   ``LOCAL`` command set, are added instead. For the remote peer, that
+   means that the queries were sent on purpose without being relayed,
+   so the real connection endpoint addresses must be used.
+
+.. option:: +proxy-plain[=src_addr[#src_port]-dst_addr[#dst_port], +noproxy-plain
+
+   The same as ``+[no]proxy``, but instructs ``dig`` to send PROXYv2
+   headers ahead of any encryption, before any handshake messages are
+   sent. That makes :program:`dig` behave exactly how it is described
+   in the PROXY protocol specification, but not all software expects
+   such behaviour.
+
+   Please consult the software documentation to find out if you need
+   this option. (for example, ``dnsdist`` expects encrypted PROXYv2
+   headers sent over TLS when encryption is used, while ``HAProxy``
+   and many other software packages expect plain ones).
+
+   For plain DNS transports the option is effectively an alias for the
+   ``+[no]proxy`` described above.
+
 .. option:: +qid=value
 
    This option specifies the query ID to use when sending queries.
@@ -575,11 +613,6 @@ abbreviation is unambiguous; for example, :option:`+cd` is equivalent to
 .. option:: +showsearch, +noshowsearch
 
    This option performs [or does not perform] a search showing intermediate results.
-
-.. option:: +sigchase, +nosigchase
-
-   This feature is now obsolete and has been removed; use :iscman:`delv`
-   instead.
 
 .. option:: +split=W
 
@@ -650,36 +683,29 @@ abbreviation is unambiguous; for example, :option:`+cd` is equivalent to
    server TLS certificate verification. Otherwise, the DNS server name
    is used. This option has no effect if :option:`+tls-ca` is not specified.
 
-.. option:: +topdown, +notopdown
-
-   This feature is related to :option:`dig +sigchase`, which is obsolete and
-   has been removed. Use :iscman:`delv` instead.
-
 .. option:: +trace, +notrace
 
-   This option toggles tracing of the delegation path from the root name servers for
-   the name being looked up. Tracing is disabled by default. When
-   tracing is enabled, :program:`dig` makes iterative queries to resolve the
-   name being looked up. It follows referrals from the root servers,
-   showing the answer from each server that was used to resolve the
-   lookup.
+   This option toggles tracing of the delegation path from the root name
+   servers for the name being looked up. Tracing is disabled by default.
+   When tracing is enabled, :program:`dig` makes iterative queries to
+   resolve the name being looked up. It follows referrals from the root
+   servers, showing the answer from each server that was used to resolve
+   the lookup.
 
    If ``@server`` is also specified, it affects only the initial query for
    the root zone name servers.
 
-   :option:`+dnssec` is also set when :option:`+trace` is set, to better emulate the
-   default queries from a name server.
+   :option:`+dnssec` is set when :option:`+trace` is set, to better
+   emulate the default queries from a name server.
+
+   Note that the ``delv +ns`` option can also be used for tracing the
+   resolution of a name from the root (see :iscman:`delv`).
 
 .. option:: +tries=T
 
    This option sets the number of times to try UDP and TCP queries to server to ``T``
    instead of the default, 3. If ``T`` is less than or equal to zero,
    the number of tries is silently rounded up to 1.
-
-.. option:: +trusted-key=####
-
-   This option formerly specified trusted keys for use with :option:`dig +sigchase`. This
-   feature is now obsolete and has been removed; use :iscman:`delv` instead.
 
 .. option:: +ttlid, +nottlid
 

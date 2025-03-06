@@ -196,7 +196,7 @@ named_main_earlyfatal(const char *format, ...) {
 	}
 	va_end(args);
 
-	exit(1);
+	_exit(EXIT_FAILURE);
 }
 
 noreturn static void
@@ -235,7 +235,7 @@ assertion_failed(const char *file, int line, isc_assertiontype_t type,
 	if (named_g_coreok) {
 		abort();
 	}
-	exit(1);
+	_exit(EXIT_FAILURE);
 }
 
 noreturn static void
@@ -275,7 +275,7 @@ library_fatal_error(const char *file, int line, const char *func,
 	if (named_g_coreok) {
 		abort();
 	}
-	exit(1);
+	_exit(EXIT_FAILURE);
 }
 
 static void
@@ -314,8 +314,8 @@ usage(void) {
 			"[-p port] [-s]\n"
 			"             [-S sockets] [-t chrootdir] [-u "
 			"username] [-U listeners]\n"
-			"             [-X lockfile] [-m "
-			"{usage|trace|record|size|mctx}]\n"
+			"             [-m "
+			"{usage|trace|record}]\n"
 			"             [-M fill|nofill]\n"
 			"usage: named [-v|-V|-C]\n");
 }
@@ -408,7 +408,7 @@ parse_int(char *arg, const char *desc) {
 	if (tmp < 0 || tmp != ltmp) {
 		named_main_earlyfatal("%s '%s' out of range", desc, arg);
 	}
-	return (tmp);
+	return tmp;
 }
 
 static struct flag_def {
@@ -668,7 +668,6 @@ printversion(bool verbose) {
 	printf("  rndc configuration:   %s\n", rndcconf);
 	printf("  nsupdate session key: %s\n", named_g_defaultsessionkeyfile);
 	printf("  named PID file:       %s\n", named_g_defaultpidfile);
-	printf("  named lock file:      %s\n", named_g_defaultlockfile);
 #if defined(HAVE_GEOIP2)
 #define RTC(x) RUNTIME_CHECK((x) == ISC_R_SUCCESS)
 	RTC(cfg_parser_create(mctx, named_g_lctx, &parser));
@@ -890,7 +889,7 @@ parse_command_line(int argc, char *argv[]) {
 			printf("# Built-in default values. "
 			       "This is NOT the run-time configuration!\n");
 			printf("%s", named_config_getdefault());
-			exit(0);
+			exit(EXIT_SUCCESS);
 		case 'd':
 			named_g_debuglevel = parse_int(isc_commandline_argument,
 						       "debug "
@@ -946,30 +945,24 @@ parse_command_line(int argc, char *argv[]) {
 			parse_T_opt(isc_commandline_argument);
 			break;
 		case 'U':
-			named_g_udpdisp = parse_int(isc_commandline_argument,
-						    "number of UDP listeners "
-						    "per interface");
+			/* Obsolete.  No longer in use.  Ignore. */
+			named_main_earlywarning("option '-U' has been removed");
 			break;
 		case 'u':
 			named_g_username = isc_commandline_argument;
 			break;
 		case 'v':
 			printversion(false);
-			exit(0);
+			exit(EXIT_SUCCESS);
 		case 'V':
 			printversion(true);
-			exit(0);
+			exit(EXIT_SUCCESS);
 		case 'x':
 			/* Obsolete. No longer in use. Ignore. */
 			break;
 		case 'X':
-			named_g_forcelock = true;
-			if (strcasecmp(isc_commandline_argument, "none") != 0) {
-				named_g_defaultlockfile =
-					isc_commandline_argument;
-			} else {
-				named_g_defaultlockfile = NULL;
-			}
+			/* Obsolete. No longer in use. Abort. */
+			named_main_earlyfatal("option '-X' has been removed");
 			break;
 		case 'F':
 #if OPENSSL_VERSION_NUMBER >= 0x30200000L && OPENSSL_API_LEVEL >= 30200
@@ -998,7 +991,7 @@ parse_command_line(int argc, char *argv[]) {
 		case '?':
 			usage();
 			if (isc_commandline_option == '?') {
-				exit(0);
+				exit(EXIT_SUCCESS);
 			}
 			p = strchr(NAMED_MAIN_ARGS, isc_commandline_option);
 			if (p == NULL || *++p != ':') {
@@ -1041,23 +1034,13 @@ create_managers(void) {
 		ISC_LOG_INFO, "found %u CPU%s, using %u worker thread%s",
 		named_g_cpus_detected, named_g_cpus_detected == 1 ? "" : "s",
 		named_g_cpus, named_g_cpus == 1 ? "" : "s");
-	if (named_g_udpdisp == 0) {
-		named_g_udpdisp = named_g_cpus_detected;
-	}
-	if (named_g_udpdisp > named_g_cpus) {
-		named_g_udpdisp = named_g_cpus;
-	}
-	isc_log_write(named_g_lctx, NAMED_LOGCATEGORY_GENERAL,
-		      NAMED_LOGMODULE_SERVER, ISC_LOG_INFO,
-		      "using %u UDP listener%s per interface", named_g_udpdisp,
-		      named_g_udpdisp == 1 ? "" : "s");
 
 	isc_managers_create(&named_g_mctx, named_g_cpus, &named_g_loopmgr,
 			    &named_g_netmgr);
 
 	isc_nm_maxudp(named_g_netmgr, maxudp);
 
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static void
@@ -1442,7 +1425,7 @@ named_smf_get_instance(char **ins_name, int debug, isc_mem_t *mctx) {
 			UNEXPECTED_ERROR("scf_handle_create() failed: %s",
 					 scf_strerror(scf_error()));
 		}
-		return (ISC_R_FAILURE);
+		return ISC_R_FAILURE;
 	}
 
 	if (scf_handle_bind(h) == -1) {
@@ -1451,7 +1434,7 @@ named_smf_get_instance(char **ins_name, int debug, isc_mem_t *mctx) {
 					 scf_strerror(scf_error()));
 		}
 		scf_handle_destroy(h);
-		return (ISC_R_FAILURE);
+		return ISC_R_FAILURE;
 	}
 
 	if ((namelen = scf_myname(h, NULL, 0)) == -1) {
@@ -1460,7 +1443,7 @@ named_smf_get_instance(char **ins_name, int debug, isc_mem_t *mctx) {
 					 scf_strerror(scf_error()));
 		}
 		scf_handle_destroy(h);
-		return (ISC_R_FAILURE);
+		return ISC_R_FAILURE;
 	}
 
 	if ((instance = isc_mem_allocate(mctx, namelen + 1)) == NULL) {
@@ -1468,7 +1451,7 @@ named_smf_get_instance(char **ins_name, int debug, isc_mem_t *mctx) {
 				 "allocation failed: %s",
 				 isc_result_totext(ISC_R_NOMEMORY));
 		scf_handle_destroy(h);
-		return (ISC_R_FAILURE);
+		return ISC_R_FAILURE;
 	}
 
 	if (scf_myname(h, instance, namelen + 1) == -1) {
@@ -1478,12 +1461,12 @@ named_smf_get_instance(char **ins_name, int debug, isc_mem_t *mctx) {
 		}
 		scf_handle_destroy(h);
 		isc_mem_free(mctx, instance);
-		return (ISC_R_FAILURE);
+		return ISC_R_FAILURE;
 	}
 
 	scf_handle_destroy(h);
 	*ins_name = instance;
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 #endif /* HAVE_LIBSCF */
 
@@ -1677,5 +1660,5 @@ main(int argc, char *argv[]) {
 	ProfilerStop();
 #endif /* ifdef HAVE_GPERFTOOLS_PROFILER */
 
-	return (0);
+	return 0;
 }

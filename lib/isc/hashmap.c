@@ -31,13 +31,13 @@
 #include <string.h>
 
 #include <isc/ascii.h>
+#include <isc/atomic.h>
 #include <isc/entropy.h>
 #include <isc/hash.h>
 #include <isc/hashmap.h>
 #include <isc/magic.h>
 #include <isc/mem.h>
 #include <isc/result.h>
-#include <isc/siphash.h>
 #include <isc/types.h>
 #include <isc/util.h>
 
@@ -68,11 +68,10 @@
 #define HASHMAP_MAX_BITS 32U
 
 typedef struct hashmap_node {
-	const uint8_t *key;
+	const void *key;
 	void *value;
 	uint32_t hashval;
 	uint32_t psl;
-	uint16_t keysize;
 } hashmap_node_t;
 
 typedef struct hashmap_table {
@@ -84,25 +83,26 @@ typedef struct hashmap_table {
 
 struct isc_hashmap {
 	unsigned int magic;
-	bool case_sensitive;
 	uint8_t hindex;
 	uint32_t hiter; /* rehashing iterator */
 	isc_mem_t *mctx;
 	size_t count;
-	uint8_t hash_key[16];
 	hashmap_table_t tables[HASHMAP_NUM_TABLES];
+	atomic_uint_fast32_t iterators;
 };
 
 struct isc_hashmap_iter {
 	isc_hashmap_t *hashmap;
 	size_t i;
+	size_t size;
 	uint8_t hindex;
 	hashmap_node_t *cur;
 };
 
 static isc_result_t
-hashmap_add(isc_hashmap_t *hashmap, const uint32_t hashval, const uint8_t *key,
-	    const uint32_t keysize, void *value, uint8_t idx);
+hashmap_add(isc_hashmap_t *hashmap, const uint32_t hashval,
+	    isc_hashmap_match_fn match, const uint8_t *key, void *value,
+	    void **foundp, uint8_t idx);
 
 static void
 hashmap_rehash_one(isc_hashmap_t *hashmap);
@@ -117,30 +117,27 @@ under_threshold(isc_hashmap_t *hashmap);
 
 static uint8_t
 hashmap_nexttable(uint8_t idx) {
-	return ((idx == 0) ? 1 : 0);
+	return (idx == 0) ? 1 : 0;
 }
 
 static bool
 rehashing_in_progress(const isc_hashmap_t *hashmap) {
-	return (hashmap->tables[hashmap_nexttable(hashmap->hindex)].table !=
-		NULL);
+	return hashmap->tables[hashmap_nexttable(hashmap->hindex)].table !=
+	       NULL;
 }
 
 static bool
 try_nexttable(const isc_hashmap_t *hashmap, uint8_t idx) {
-	return (idx == hashmap->hindex && rehashing_in_progress(hashmap));
+	return idx == hashmap->hindex && rehashing_in_progress(hashmap);
 }
 
 static void
 hashmap_node_init(hashmap_node_t *node, const uint32_t hashval,
-		  const uint8_t *key, const uint32_t keysize, void *value) {
-	REQUIRE(key != NULL && keysize <= UINT16_MAX);
-
+		  const uint8_t *key, void *value) {
 	*node = (hashmap_node_t){
 		.value = value,
 		.hashval = hashval,
 		.key = key,
-		.keysize = keysize,
 		.psl = 0,
 	};
 }
@@ -210,10 +207,8 @@ hashmap_free_table(isc_hashmap_t *hashmap, const uint8_t idx, bool cleanup) {
 }
 
 void
-isc_hashmap_create(isc_mem_t *mctx, uint8_t bits, unsigned int options,
-		   isc_hashmap_t **hashmapp) {
+isc_hashmap_create(isc_mem_t *mctx, uint8_t bits, isc_hashmap_t **hashmapp) {
 	isc_hashmap_t *hashmap = isc_mem_get(mctx, sizeof(*hashmap));
-	bool case_sensitive = ((options & ISC_HASHMAP_CASE_INSENSITIVE) == 0);
 
 	REQUIRE(hashmapp != NULL && *hashmapp == NULL);
 	REQUIRE(mctx != NULL);
@@ -221,14 +216,8 @@ isc_hashmap_create(isc_mem_t *mctx, uint8_t bits, unsigned int options,
 
 	*hashmap = (isc_hashmap_t){
 		.magic = ISC_HASHMAP_MAGIC,
-		.hash_key = { 0, 1 },
-		.case_sensitive = case_sensitive,
 	};
 	isc_mem_attach(mctx, &hashmap->mctx);
-
-#if !defined(FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION) && !defined(UNIT_TESTING)
-	isc_entropy_get(hashmap->hash_key, sizeof(hashmap->hash_key));
-#endif /* if FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION */
 
 	hashmap_create_table(hashmap, 0, bits);
 
@@ -259,18 +248,9 @@ isc_hashmap_destroy(isc_hashmap_t **hashmapp) {
 	isc_mem_putanddetach(&hashmap->mctx, hashmap, sizeof(*hashmap));
 }
 
-static bool
-hashmap_match(hashmap_node_t *node, const uint32_t hashval, const uint8_t *key,
-	      const uint32_t keysize, const bool case_sensitive) {
-	return (node->hashval == hashval && node->keysize == keysize &&
-		(case_sensitive
-			 ? (memcmp(node->key, key, keysize) == 0)
-			 : (isc_ascii_lowerequal(node->key, key, keysize))));
-}
-
 static hashmap_node_t *
 hashmap_find(const isc_hashmap_t *hashmap, const uint32_t hashval,
-	     const uint8_t *key, uint32_t keysize, uint32_t *pslp,
+	     isc_hashmap_match_fn match, const uint8_t *key, uint32_t *pslp,
 	     uint8_t *idxp) {
 	uint32_t hash;
 	uint32_t psl;
@@ -292,12 +272,12 @@ nexttable:
 			break;
 		}
 
-		if (hashmap_match(node, hashval, key, keysize,
-				  hashmap->case_sensitive))
-		{
-			*pslp = psl;
-			*idxp = idx;
-			return (node);
+		if (node->hashval == hashval) {
+			if (match(node->value, key)) {
+				*pslp = psl;
+				*idxp = idx;
+				return node;
+			}
 		}
 
 		psl++;
@@ -307,56 +287,39 @@ nexttable:
 		goto nexttable;
 	}
 
-	return (NULL);
-}
-
-uint32_t
-isc_hashmap_hash(const isc_hashmap_t *hashmap, const void *key,
-		 uint32_t keysize) {
-	REQUIRE(ISC_HASHMAP_VALID(hashmap));
-
-	uint32_t hashval;
-
-	isc_halfsiphash24(hashmap->hash_key, key, keysize,
-			  hashmap->case_sensitive, (uint8_t *)&hashval);
-
-	return (hashval);
+	return NULL;
 }
 
 isc_result_t
-isc_hashmap_find(const isc_hashmap_t *hashmap, const uint32_t *hashvalp,
-		 const void *key, uint32_t keysize, void **valuep) {
+isc_hashmap_find(const isc_hashmap_t *hashmap, const uint32_t hashval,
+		 isc_hashmap_match_fn match, const void *key, void **valuep) {
 	REQUIRE(ISC_HASHMAP_VALID(hashmap));
-	REQUIRE(key != NULL && keysize <= UINT16_MAX);
 	REQUIRE(valuep == NULL || *valuep == NULL);
 
-	hashmap_node_t *node = NULL;
 	uint8_t idx = hashmap->hindex;
-	uint32_t hashval = (hashvalp != NULL)
-				   ? *hashvalp
-				   : isc_hashmap_hash(hashmap, key, keysize);
-
-	node = hashmap_find(hashmap, hashval, key, keysize, &(uint32_t){ 0 },
-			    &idx);
+	hashmap_node_t *node = hashmap_find(hashmap, hashval, match, key,
+					    &(uint32_t){ 0 }, &idx);
 	if (node == NULL) {
-		return (ISC_R_NOTFOUND);
+		return ISC_R_NOTFOUND;
 	}
 
 	INSIST(node->key != NULL);
 	SET_IF_NOT_NULL(valuep, node->value);
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
-static void
+static bool
 hashmap_delete_node(isc_hashmap_t *hashmap, hashmap_node_t *entry,
-		    uint32_t hashval, uint32_t psl, const uint8_t idx) {
+		    uint32_t hashval, uint32_t psl, const uint8_t idx,
+		    size_t size) {
 	uint32_t pos;
 	uint32_t hash;
+	bool last = false;
 
 	hashmap->count--;
 
 	hash = isc_hash_bits32(hashval, hashmap->tables[idx].hashbits);
-	pos = hash + psl;
+	pos = (hash + psl) & hashmap->tables[idx].hashmask;
 
 	while (true) {
 		hashmap_node_t *node = NULL;
@@ -370,12 +333,17 @@ hashmap_delete_node(isc_hashmap_t *hashmap, hashmap_node_t *entry,
 			break;
 		}
 
+		if ((pos % size) == 0) {
+			last = true;
+		}
+
 		node->psl--;
 		*entry = *node;
 		entry = &hashmap->tables[idx].table[pos];
 	}
 
 	*entry = (hashmap_node_t){ 0 };
+	return last;
 }
 
 static void
@@ -384,7 +352,9 @@ hashmap_rehash_one(isc_hashmap_t *hashmap) {
 	uint32_t oldsize = hashmap->tables[oldidx].size;
 	hashmap_node_t *oldtable = hashmap->tables[oldidx].table;
 	hashmap_node_t node;
-	isc_result_t result;
+
+	/* Don't rehash when iterating */
+	INSIST(atomic_load_acquire(&hashmap->iterators) == 0);
 
 	/* Find first non-empty node */
 	while (hashmap->hiter < oldsize && oldtable[hashmap->hiter].key == NULL)
@@ -403,11 +373,11 @@ hashmap_rehash_one(isc_hashmap_t *hashmap) {
 	/* Move the first non-empty node from old table to new table */
 	node = oldtable[hashmap->hiter];
 
-	hashmap_delete_node(hashmap, &oldtable[hashmap->hiter], node.hashval,
-			    node.psl, oldidx);
+	(void)hashmap_delete_node(hashmap, &oldtable[hashmap->hiter],
+				  node.hashval, node.psl, oldidx, UINT32_MAX);
 
-	result = hashmap_add(hashmap, node.hashval, node.key, node.keysize,
-			     node.value, hashmap->hindex);
+	isc_result_t result = hashmap_add(hashmap, node.hashval, NULL, node.key,
+					  node.value, NULL, hashmap->hindex);
 	INSIST(result == ISC_R_SUCCESS);
 
 	/*
@@ -429,7 +399,7 @@ grow_bits(isc_hashmap_t *hashmap) {
 		newbits = HASHMAP_MAX_BITS;
 	}
 
-	return (newbits);
+	return newbits;
 }
 
 static uint32_t
@@ -440,7 +410,7 @@ shrink_bits(isc_hashmap_t *hashmap) {
 		newbits = HASHMAP_MIN_BITS;
 	}
 
-	return (newbits);
+	return newbits;
 }
 
 static void
@@ -478,18 +448,15 @@ hashmap_rehash_start_shrink(isc_hashmap_t *hashmap) {
 }
 
 isc_result_t
-isc_hashmap_delete(isc_hashmap_t *hashmap, const uint32_t *hashvalp,
-		   const void *key, uint32_t keysize) {
+isc_hashmap_delete(isc_hashmap_t *hashmap, const uint32_t hashval,
+		   isc_hashmap_match_fn match, const void *key) {
 	REQUIRE(ISC_HASHMAP_VALID(hashmap));
-	REQUIRE(key != NULL && keysize <= UINT16_MAX);
+	REQUIRE(key != NULL);
 
 	hashmap_node_t *node;
 	isc_result_t result = ISC_R_NOTFOUND;
 	uint32_t psl = 0;
 	uint8_t idx;
-	uint32_t hashval = (hashvalp != NULL)
-				   ? *hashvalp
-				   : isc_hashmap_hash(hashmap, key, keysize);
 
 	if (rehashing_in_progress(hashmap)) {
 		hashmap_rehash_one(hashmap);
@@ -501,49 +468,53 @@ isc_hashmap_delete(isc_hashmap_t *hashmap, const uint32_t *hashvalp,
 	/* Initialize idx after possible shrink start */
 	idx = hashmap->hindex;
 
-	node = hashmap_find(hashmap, hashval, key, keysize, &psl, &idx);
+	node = hashmap_find(hashmap, hashval, match, key, &psl, &idx);
 	if (node != NULL) {
 		INSIST(node->key != NULL);
-		hashmap_delete_node(hashmap, node, hashval, psl, idx);
+		(void)hashmap_delete_node(hashmap, node, hashval, psl, idx,
+					  UINT32_MAX);
 		result = ISC_R_SUCCESS;
 	}
 
-	return (result);
+	return result;
 }
 
 static bool
 over_threshold(isc_hashmap_t *hashmap) {
 	uint32_t bits = hashmap->tables[hashmap->hindex].hashbits;
 	if (bits == HASHMAP_MAX_BITS) {
-		return (false);
+		return false;
 	}
 	size_t threshold = APPROX_90_PERCENT(HASHSIZE(bits));
-	return (hashmap->count > threshold);
+	return hashmap->count > threshold;
 }
 
 static bool
 under_threshold(isc_hashmap_t *hashmap) {
 	uint32_t bits = hashmap->tables[hashmap->hindex].hashbits;
 	if (bits == HASHMAP_MIN_BITS) {
-		return (false);
+		return false;
 	}
 	size_t threshold = APPROX_20_PERCENT(HASHSIZE(bits));
-	return (hashmap->count < threshold);
+	return hashmap->count < threshold;
 }
 
 static isc_result_t
-hashmap_add(isc_hashmap_t *hashmap, const uint32_t hashval, const uint8_t *key,
-	    const uint32_t keysize, void *value, uint8_t idx) {
+hashmap_add(isc_hashmap_t *hashmap, const uint32_t hashval,
+	    isc_hashmap_match_fn match, const uint8_t *key, void *value,
+	    void **foundp, uint8_t idx) {
 	uint32_t hash;
 	uint32_t psl = 0;
 	hashmap_node_t node;
 	hashmap_node_t *current = NULL;
 	uint32_t pos;
 
+	INSIST(atomic_load_acquire(&hashmap->iterators) == 0);
+
 	hash = isc_hash_bits32(hashval, hashmap->tables[idx].hashbits);
 
 	/* Initialize the node to be store to 'node' */
-	hashmap_node_init(&node, hashval, key, keysize, value);
+	hashmap_node_init(&node, hashval, key, value);
 
 	psl = 0;
 	while (true) {
@@ -556,11 +527,13 @@ hashmap_add(isc_hashmap_t *hashmap, const uint32_t hashval, const uint8_t *key,
 			break;
 		}
 
-		if (hashmap_match(current, hashval, key, keysize,
-				  hashmap->case_sensitive))
-		{
-			return (ISC_R_EXISTS);
+		if (current->hashval == hashval) {
+			if (match != NULL && match(current->value, key)) {
+				SET_IF_NOT_NULL(foundp, current->value);
+				return ISC_R_EXISTS;
+			}
 		}
+
 		/* Found rich node */
 		if (node.psl > current->psl) {
 			/* Swap the poor with the rich node */
@@ -587,19 +560,15 @@ hashmap_add(isc_hashmap_t *hashmap, const uint32_t hashval, const uint8_t *key,
 	/* We found an empty place, store entry into current node */
 	*current = node;
 
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 isc_result_t
-isc_hashmap_add(isc_hashmap_t *hashmap, const uint32_t *hashvalp,
-		const void *key, uint32_t keysize, void *value) {
+isc_hashmap_add(isc_hashmap_t *hashmap, const uint32_t hashval,
+		isc_hashmap_match_fn match, const void *key, void *value,
+		void **foundp) {
 	REQUIRE(ISC_HASHMAP_VALID(hashmap));
-	REQUIRE(key != NULL && keysize <= UINT16_MAX);
-
-	isc_result_t result;
-	uint32_t hashval = (hashvalp != NULL)
-				   ? *hashvalp
-				   : isc_hashmap_hash(hashmap, key, keysize);
+	REQUIRE(key != NULL);
 
 	if (rehashing_in_progress(hashmap)) {
 		hashmap_rehash_one(hashmap);
@@ -613,20 +582,17 @@ isc_hashmap_add(isc_hashmap_t *hashmap, const uint32_t *hashvalp,
 		uint32_t psl;
 
 		/* Look for the value in the old table */
-		if (hashmap_find(hashmap, hashval, key, keysize, &psl, &fidx)) {
-			return (ISC_R_EXISTS);
+		hashmap_node_t *found = hashmap_find(hashmap, hashval, match,
+						     key, &psl, &fidx);
+		if (found != NULL) {
+			INSIST(found->key != NULL);
+			SET_IF_NOT_NULL(foundp, found->value);
+			return ISC_R_EXISTS;
 		}
 	}
 
-	result = hashmap_add(hashmap, hashval, key, keysize, value,
-			     hashmap->hindex);
-	switch (result) {
-	case ISC_R_SUCCESS:
-	case ISC_R_EXISTS:
-		return (result);
-	default:
-		UNREACHABLE();
-	}
+	return hashmap_add(hashmap, hashval, match, key, value, foundp,
+			   hashmap->hindex);
 }
 
 void
@@ -642,6 +608,8 @@ isc_hashmap_iter_create(isc_hashmap_t *hashmap, isc_hashmap_iter_t **iterp) {
 		.hindex = hashmap->hindex,
 	};
 
+	(void)atomic_fetch_add_release(&hashmap->iterators, 1);
+
 	*iterp = iter;
 }
 
@@ -656,31 +624,34 @@ isc_hashmap_iter_destroy(isc_hashmap_iter_t **iterp) {
 	*iterp = NULL;
 	hashmap = iter->hashmap;
 	isc_mem_put(hashmap->mctx, iter, sizeof(*iter));
+
+	INSIST(atomic_fetch_sub_release(&hashmap->iterators, 1) > 0);
 }
 
 static isc_result_t
 isc__hashmap_iter_next(isc_hashmap_iter_t *iter) {
 	isc_hashmap_t *hashmap = iter->hashmap;
 
-	while (iter->i < hashmap->tables[iter->hindex].size &&
+	while (iter->i < iter->size &&
 	       hashmap->tables[iter->hindex].table[iter->i].key == NULL)
 	{
 		iter->i++;
 	}
 
-	if (iter->i < hashmap->tables[iter->hindex].size) {
+	if (iter->i < iter->size) {
 		iter->cur = &hashmap->tables[iter->hindex].table[iter->i];
 
-		return (ISC_R_SUCCESS);
+		return ISC_R_SUCCESS;
 	}
 
 	if (try_nexttable(hashmap, iter->hindex)) {
 		iter->hindex = hashmap_nexttable(iter->hindex);
-		iter->i = 0;
-		return (isc__hashmap_iter_next(iter));
+		iter->i = hashmap->hiter;
+		iter->size = hashmap->tables[iter->hindex].size;
+		return isc__hashmap_iter_next(iter);
 	}
 
-	return (ISC_R_NOMORE);
+	return ISC_R_NOMORE;
 }
 
 isc_result_t
@@ -689,8 +660,9 @@ isc_hashmap_iter_first(isc_hashmap_iter_t *iter) {
 
 	iter->hindex = iter->hashmap->hindex;
 	iter->i = 0;
+	iter->size = iter->hashmap->tables[iter->hashmap->hindex].size;
 
-	return (isc__hashmap_iter_next(iter));
+	return isc__hashmap_iter_next(iter);
 }
 
 isc_result_t
@@ -700,7 +672,7 @@ isc_hashmap_iter_next(isc_hashmap_iter_t *iter) {
 
 	iter->i++;
 
-	return (isc__hashmap_iter_next(iter));
+	return isc__hashmap_iter_next(iter);
 }
 
 isc_result_t
@@ -711,10 +683,18 @@ isc_hashmap_iter_delcurrent_next(isc_hashmap_iter_t *iter) {
 	hashmap_node_t *node =
 		&iter->hashmap->tables[iter->hindex].table[iter->i];
 
-	hashmap_delete_node(iter->hashmap, node, node->hashval, node->psl,
-			    iter->hindex);
+	if (hashmap_delete_node(iter->hashmap, node, node->hashval, node->psl,
+				iter->hindex, iter->size))
+	{
+		/*
+		 * We have seen the new last element so reduce the size
+		 * so we don't iterate over it twice.
+		 */
+		INSIST(iter->size != 0);
+		iter->size--;
+	}
 
-	return (isc__hashmap_iter_next(iter));
+	return isc__hashmap_iter_next(iter);
 }
 
 void
@@ -727,19 +707,17 @@ isc_hashmap_iter_current(isc_hashmap_iter_t *it, void **valuep) {
 }
 
 void
-isc_hashmap_iter_currentkey(isc_hashmap_iter_t *it, const unsigned char **key,
-			    size_t *keysize) {
+isc_hashmap_iter_currentkey(isc_hashmap_iter_t *it, const unsigned char **key) {
 	REQUIRE(it != NULL);
 	REQUIRE(it->cur != NULL);
 	REQUIRE(key != NULL && *key == NULL);
 
 	*key = it->cur->key;
-	*keysize = it->cur->keysize;
 }
 
 unsigned int
 isc_hashmap_count(isc_hashmap_t *hashmap) {
 	REQUIRE(ISC_HASHMAP_VALID(hashmap));
 
-	return (hashmap->count);
+	return hashmap->count;
 }

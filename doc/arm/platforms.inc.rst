@@ -30,7 +30,7 @@ The following C11 features are required to compile BIND 9:
 
 -  Thread Local Storage support defined in <threads.h>
 
-Where it makes sense, BIND 9 uses C-standard fixes introduced by C17 update
+Where it makes sense, BIND 9 uses C-standard fixes introduced by the C17 update
 of the C11 standard.
 
 ISC regularly tests BIND on many operating systems and architectures,
@@ -43,13 +43,12 @@ Regularly Tested Platforms
 Current versions of BIND 9 are fully supported and regularly tested on the
 following systems:
 
--  Debian 11, 12
--  Ubuntu LTS 20.04, 22.04
--  Fedora 38
+-  Debian 12
+-  Ubuntu LTS 20.04, 22.04, 24.04
+-  Fedora 41
 -  Red Hat Enterprise Linux / CentOS / Oracle Linux 8, 9
--  FreeBSD 12.4, 13.2
--  OpenBSD 7.3
--  Alpine Linux 3.18
+-  FreeBSD 13.4, 14.2
+-  Alpine Linux 3.21
 
 The amd64 CPU architecture is fully supported and regularly tested.
 
@@ -65,6 +64,7 @@ regularly by ISC.
 -  macOS 10.12+
 -  Solaris 11
 -  NetBSD
+-  OpenBSD
 -  Other Linux distributions still supported by their vendors, such as:
 
    -  Ubuntu 22.10+
@@ -89,7 +89,7 @@ supported platforms.
 
    -  Ubuntu 14.04, 16.04, 18.04 (Ubuntu ESM releases are not supported)
    -  Red Hat Enterprise Linux / CentOS / Oracle Linux 6, 7
-   -  Debian 8 Jessie, 9 Stretch, 10 Buster
+   -  Debian 8 Jessie, 9 Stretch, 10 Buster, 11 Bullseye
    -  FreeBSD 10.x, 11.x
 
 -  Less common CPU architectures (i386, i686, mips, mipsel, sparc, ppc, and others)
@@ -102,7 +102,7 @@ These are platforms on which current versions of BIND 9 are known *not* to build
 -  Platforms without at least OpenSSL 1.0.2
 -  Windows
 -  Solaris 10 and older
--  Platforms that do not support IPv6 Advanced Socket API (RFC 3542)
+-  Platforms that do not support IPv6 Advanced Socket API (:rfc:`3542`)
 -  Platforms that do not support atomic operations (via compiler or
    library)
 -  Linux without NPTL (Native POSIX Thread Library)

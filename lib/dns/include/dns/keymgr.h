@@ -24,15 +24,26 @@
 
 ISC_LANG_BEGINDECLS
 
+void
+dns_keymgr_settime_syncpublish(dst_key_t *key, dns_kasp_t *kasp, bool first);
+/*%<
+ * Set the SyncPublish time (when the DS may be submitted to the parent).
+ * If 'first' is true, also make sure that the zone signatures are omnipresent.
+ *
+ *      Requires:
+ *\li           'key' is a valid DNSSEC key.
+ *\li           'kasp' is a valid DNSSEC policy.
+ */
+
 isc_result_t
 dns_keymgr_run(const dns_name_t *origin, dns_rdataclass_t rdclass,
-	       const char *directory, isc_mem_t *mctx,
-	       dns_dnsseckeylist_t *keyring, dns_dnsseckeylist_t *dnskeys,
+	       isc_mem_t *mctx, dns_dnsseckeylist_t *keyring,
+	       dns_dnsseckeylist_t *dnskeys, const char *keydir,
 	       dns_kasp_t *kasp, isc_stdtime_t now, isc_stdtime_t *nexttime);
 /*%<
  * Manage keys in 'keyring' and update timing data according to 'kasp' policy.
- * Create new keys for 'origin' if necessary in 'directory'.  Append all such
- * keys, along with use hints gleaned from their metadata, onto 'keyring'.
+ * Create new keys for 'origin' if necessary.  Append all such keys, along
+ * with use hints gleaned from their metadata, onto 'keyring'.
  *
  * Update key states and store changes back to disk. Store when to run next
  * in 'nexttime'.
@@ -53,14 +64,35 @@ dns_keymgr_run(const dns_name_t *origin, dns_rdataclass_t rdclass,
  */
 
 isc_result_t
+dns_keymgr_offline(const dns_name_t *origin, dns_dnsseckeylist_t *keyring,
+		   dns_kasp_t *kasp, isc_stdtime_t now,
+		   isc_stdtime_t *nexttime);
+/*%<
+ * Manage keys in 'keyring' when in offline-ksk mode, and update timing data
+ * according to the metadata in the key files. KSKs are skipped.
+ *
+ * Update key states and store changes back to disk. Store when to run next
+ * in 'nexttime'.
+ *
+ *	Requires:
+ *\li		'origin' is a valid FQDN.
+ *\li		'mctx' is a valid memory context.
+ *\li		'keyring' is not NULL.
+ *\li		'kasp' is not NULL.
+ *
+ *	Returns:
+ *\li		#ISC_R_SUCCESS
+ *\li		any error returned by dst_key_getstate(), dst_key_gettime(),
+ *		isc_dir_open(), or dst_key_to_file().
+ */
+
+isc_result_t
 dns_keymgr_checkds(dns_kasp_t *kasp, dns_dnsseckeylist_t *keyring,
-		   const char *directory, isc_stdtime_t now, isc_stdtime_t when,
-		   bool dspublish);
+		   isc_stdtime_t now, isc_stdtime_t when, bool dspublish);
 isc_result_t
 dns_keymgr_checkds_id(dns_kasp_t *kasp, dns_dnsseckeylist_t *keyring,
-		      const char *directory, isc_stdtime_t now,
-		      isc_stdtime_t when, bool dspublish, dns_keytag_t id,
-		      unsigned int algorithm);
+		      isc_stdtime_t now, isc_stdtime_t when, bool dspublish,
+		      dns_keytag_t id, unsigned int algorithm);
 /*%<
  * Check DS for one key in 'keyring'. The key must have the KSK role.
  * If 'dspublish' is set to true, set the DS Publish time to 'now'.
@@ -82,8 +114,7 @@ dns_keymgr_checkds_id(dns_kasp_t *kasp, dns_dnsseckeylist_t *keyring,
 
 isc_result_t
 dns_keymgr_rollover(dns_kasp_t *kasp, dns_dnsseckeylist_t *keyring,
-		    const char *directory, isc_stdtime_t now,
-		    isc_stdtime_t when, dns_keytag_t id,
+		    isc_stdtime_t now, isc_stdtime_t when, dns_keytag_t id,
 		    unsigned int algorithm);
 /*%<
  * Rollover key with given 'id'. If the 'algorithm' is non-zero, it must
@@ -111,7 +142,7 @@ dns_keymgr_rollover(dns_kasp_t *kasp, dns_dnsseckeylist_t *keyring,
  *
  */
 
-void
+isc_result_t
 dns_keymgr_status(dns_kasp_t *kasp, dns_dnsseckeylist_t *keyring,
 		  isc_stdtime_t now, char *out, size_t out_len);
 /*%<
@@ -124,6 +155,9 @@ dns_keymgr_status(dns_kasp_t *kasp, dns_dnsseckeylist_t *keyring,
  *\li		'out' is not NULL.
  *
  *	Returns:
+ *\li		ISC_R_SUCCESS on success.
+ *\li		ISC_R_NOSPACE if the 'out' buffer is too small.
+ *\li		ISC_R_FAILURE if other error occurred.
  *\li		Printable status in 'out'.
  *
  */

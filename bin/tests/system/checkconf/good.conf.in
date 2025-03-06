@@ -23,9 +23,9 @@ dnssec-policy "test" {
 	};
 	dnskey-ttl 3600;
 	keys {
-		ksk key-directory lifetime P1Y algorithm 13 256;
-		zsk key-directory lifetime P30D algorithm 13;
-		csk key-directory lifetime P30D algorithm 8 2048;
+		ksk key-directory lifetime P1Y algorithm 13 tag-range 0 32767;
+		zsk lifetime P30D algorithm 13;
+		csk key-store "hsm" lifetime P30D algorithm 8 2048;
 	};
 	max-zone-ttl 86400;
 	nsec3param ;
@@ -34,10 +34,15 @@ dnssec-policy "test" {
 	publish-safety PT3600S;
 	purge-keys P90D;
 	retire-safety PT3600S;
+	signatures-jitter PT12H;
 	signatures-refresh P3D;
 	signatures-validity P2W;
 	signatures-validity-dnskey P14D;
 	zone-propagation-delay PT5M;
+};
+key-store "hsm" {
+	directory ".";
+	pkcs11-uri "pkcs11:token=bind9;pin-value=1234";
 };
 options {
 	avoid-v4-udp-ports {
@@ -76,6 +81,8 @@ options {
 	check-names primary warn;
 	check-names secondary ignore;
 	max-cache-size 20000000000000;
+	max-query-count 100;
+	max-query-restarts 10;
 	nta-lifetime 604800;
 	nta-recheck 604800;
 	validate-except {
@@ -86,7 +93,7 @@ options {
 	transfer-source 0.0.0.0;
 	zone-statistics none;
 };
-parental-agents "parents" port 5353 source 10.10.10.10 port 5354 source-v6 2001:db8::10 port 5355 {
+remote-servers "parents" port 5353 source 10.10.10.10 port 5354 source-v6 2001:db8::10 port 5355 {
 	10.10.10.11;
 	2001:db8::11;
 };
@@ -107,6 +114,7 @@ view "first" {
 		max-ixfr-ratio unlimited;
 	};
 	dnssec-validation auto;
+	max-query-restarts 15;
 	zone-statistics terse;
 };
 view "second" {

@@ -51,8 +51,7 @@ struct dns_keynode {
 	isc_mem_t *mctx;
 	isc_refcount_t references;
 	isc_rwlock_t rwlock;
-	dns_fixedname_t fn;
-	dns_name_t *name;
+	dns_name_t name;
 	dns_rdatalist_t *dslist;
 	dns_rdataset_t dsset;
 	bool managed;
@@ -104,7 +103,6 @@ static void
 destroy_keynode(dns_keynode_t *knode) {
 	dns_rdata_t *rdata = NULL;
 
-	isc_refcount_destroy(&knode->references);
 	isc_rwlock_destroy(&knode->rwlock);
 	if (knode->dslist != NULL) {
 		for (rdata = ISC_LIST_HEAD(knode->dslist->rdata); rdata != NULL;
@@ -120,6 +118,7 @@ destroy_keynode(dns_keynode_t *knode) {
 		knode->dslist = NULL;
 	}
 
+	dns_name_free(&knode->name, knode->mctx);
 	isc_mem_putanddetach(&knode->mctx, knode, sizeof(dns_keynode_t));
 }
 
@@ -156,14 +155,13 @@ destroy_keytable(dns_keytable_t *keytable) {
 
 	dns_qpmulti_query(keytable->table, &qpr);
 	dns_qpiter_init(&qpr, &iter);
-	while (dns_qpiter_next(&iter, &pval, NULL) == ISC_R_SUCCESS) {
+	while (dns_qpiter_next(&iter, NULL, &pval, NULL) == ISC_R_SUCCESS) {
 		dns_keynode_t *n = pval;
 		dns_keynode_detach(&n);
 	}
 	dns_qpread_destroy(keytable->table, &qpr);
 
 	dns_qpmulti_destroy(&keytable->table);
-	isc_refcount_destroy(&keytable->references);
 
 	isc_mem_putanddetach(&keytable->mctx, keytable, sizeof(*keytable));
 }
@@ -241,7 +239,7 @@ delete_ds(dns_qp_t *qp, dns_keytable_t *keytable, dns_keynode_t *knode,
 	RWLOCK(&knode->rwlock, isc_rwlocktype_read);
 	if (knode->dslist == NULL) {
 		RWUNLOCK(&knode->rwlock, isc_rwlocktype_read);
-		return (ISC_R_SUCCESS);
+		return ISC_R_SUCCESS;
 	}
 
 	isc_buffer_init(&b, data, DNS_DS_BUFFERSIZE);
@@ -250,7 +248,7 @@ delete_ds(dns_qp_t *qp, dns_keytable_t *keytable, dns_keynode_t *knode,
 				      dns_rdatatype_ds, ds, &b);
 	if (result != ISC_R_SUCCESS) {
 		RWUNLOCK(&knode->rwlock, isc_rwlocktype_write);
-		return (result);
+		return result;
 	}
 
 	for (rdata = ISC_LIST_HEAD(knode->dslist->rdata); rdata != NULL;
@@ -268,13 +266,13 @@ delete_ds(dns_qp_t *qp, dns_keytable_t *keytable, dns_keynode_t *knode,
 		 * The keyname must have matched or we wouldn't be here,
 		 * so we use DNS_R_PARTIALMATCH instead of ISC_R_NOTFOUND.
 		 */
-		return (DNS_R_PARTIALMATCH);
+		return DNS_R_PARTIALMATCH;
 	}
 
 	/*
 	 * Replace knode with a new instance without the DS.
 	 */
-	newnode = new_keynode(knode->name, NULL, keytable, knode->managed,
+	newnode = new_keynode(&knode->name, NULL, keytable, knode->managed,
 			      knode->initial);
 	for (rdata = ISC_LIST_HEAD(knode->dslist->rdata); rdata != NULL;
 	     rdata = ISC_LIST_NEXT(rdata, link))
@@ -287,7 +285,7 @@ delete_ds(dns_qp_t *qp, dns_keytable_t *keytable, dns_keynode_t *knode,
 		}
 	}
 
-	result = dns_qp_deletename(qp, knode->name, &pval, NULL);
+	result = dns_qp_deletename(qp, &knode->name, &pval, NULL);
 	INSIST(result == ISC_R_SUCCESS);
 	INSIST(pval == knode);
 
@@ -297,7 +295,7 @@ delete_ds(dns_qp_t *qp, dns_keytable_t *keytable, dns_keynode_t *knode,
 	RWUNLOCK(&knode->rwlock, isc_rwlocktype_read);
 
 	dns_keynode_detach(&knode);
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 /*%
@@ -314,14 +312,14 @@ new_keynode(const dns_name_t *name, dns_rdata_ds_t *ds,
 	REQUIRE(!initial || managed);
 
 	knode = isc_mem_get(keytable->mctx, sizeof(dns_keynode_t));
-	*knode = (dns_keynode_t){ .magic = KEYNODE_MAGIC };
+	*knode = (dns_keynode_t){ .name = DNS_NAME_INITEMPTY,
+				  .magic = KEYNODE_MAGIC };
 
 	dns_rdataset_init(&knode->dsset);
 	isc_refcount_init(&knode->references, 1);
 	isc_rwlock_init(&knode->rwlock);
 
-	knode->name = dns_fixedname_initname(&knode->fn);
-	dns_name_copy(name, knode->name);
+	dns_name_dupwithoffsets(name, keytable->mctx, &knode->name);
 
 	/*
 	 * If a DS was supplied, initialize an rdatalist.
@@ -334,7 +332,7 @@ new_keynode(const dns_name_t *name, dns_rdata_ds_t *ds,
 	knode->managed = managed;
 	knode->initial = initial;
 
-	return (knode);
+	return knode;
 }
 
 /*%
@@ -384,7 +382,7 @@ insert(dns_keytable_t *keytable, bool managed, bool initial,
 	dns_qp_compact(qp, DNS_QPGC_MAYBE);
 	dns_qpmulti_commit(keytable->table, &qp);
 
-	return (result);
+	return result;
 }
 
 isc_result_t
@@ -394,13 +392,13 @@ dns_keytable_add(dns_keytable_t *keytable, bool managed, bool initial,
 	REQUIRE(ds != NULL);
 	REQUIRE(!initial || managed);
 
-	return (insert(keytable, managed, initial, name, ds, callback,
-		       callback_arg));
+	return insert(keytable, managed, initial, name, ds, callback,
+		      callback_arg);
 }
 
 isc_result_t
 dns_keytable_marksecure(dns_keytable_t *keytable, const dns_name_t *name) {
-	return (insert(keytable, true, false, name, NULL, NULL, NULL));
+	return insert(keytable, true, false, name, NULL, NULL, NULL);
 }
 
 isc_result_t
@@ -425,7 +423,7 @@ dns_keytable_delete(dns_keytable_t *keytable, const dns_name_t *keyname,
 	dns_qp_compact(qp, DNS_QPGC_MAYBE);
 	dns_qpmulti_commit(keytable->table, &qp);
 
-	return (result);
+	return result;
 }
 
 isc_result_t
@@ -479,7 +477,7 @@ finish:
 	dns_qp_compact(qp, DNS_QPGC_MAYBE);
 	dns_qpmulti_commit(keytable->table, &qp);
 
-	return (result);
+	return result;
 }
 
 isc_result_t
@@ -501,7 +499,7 @@ dns_keytable_find(dns_keytable_t *keytable, const dns_name_t *keyname,
 	}
 	dns_qpread_destroy(keytable->table, &qpr);
 
-	return (result);
+	return result;
 }
 
 isc_result_t
@@ -521,16 +519,16 @@ dns_keytable_finddeepestmatch(dns_keytable_t *keytable, const dns_name_t *name,
 	REQUIRE(foundname != NULL);
 
 	dns_qpmulti_query(keytable->table, &qpr);
-	result = dns_qp_findname_ancestor(&qpr, name, 0, &pval, NULL);
+	result = dns_qp_lookup(&qpr, name, NULL, NULL, NULL, &pval, NULL);
 	keynode = pval;
 
 	if (result == ISC_R_SUCCESS || result == DNS_R_PARTIALMATCH) {
-		dns_name_copy(keynode->name, foundname);
+		dns_name_copy(&keynode->name, foundname);
 		result = ISC_R_SUCCESS;
 	}
 
 	dns_qpread_destroy(keytable->table, &qpr);
-	return (result);
+	return result;
 }
 
 isc_result_t
@@ -550,11 +548,11 @@ dns_keytable_issecuredomain(dns_keytable_t *keytable, const dns_name_t *name,
 	REQUIRE(wantdnssecp != NULL);
 
 	dns_qpmulti_query(keytable->table, &qpr);
-	result = dns_qp_findname_ancestor(&qpr, name, 0, &pval, NULL);
+	result = dns_qp_lookup(&qpr, name, NULL, NULL, NULL, &pval, NULL);
 	if (result == ISC_R_SUCCESS || result == DNS_R_PARTIALMATCH) {
 		keynode = pval;
 		if (foundname != NULL) {
-			dns_name_copy(keynode->name, foundname);
+			dns_name_copy(&keynode->name, foundname);
 		}
 		*wantdnssecp = true;
 		result = ISC_R_SUCCESS;
@@ -565,7 +563,7 @@ dns_keytable_issecuredomain(dns_keytable_t *keytable, const dns_name_t *name,
 
 	dns_qpread_destroy(keytable->table, &qpr);
 
-	return (result);
+	return result;
 }
 
 static isc_result_t
@@ -574,11 +572,11 @@ putstr(isc_buffer_t **b, const char *str) {
 
 	result = isc_buffer_reserve(*b, strlen(str));
 	if (result != ISC_R_SUCCESS) {
-		return (result);
+		return result;
 	}
 
 	isc_buffer_putstr(*b, str);
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 isc_result_t
@@ -607,7 +605,7 @@ dns_keytable_dump(dns_keytable_t *keytable, FILE *fp) {
 		(char *)isc_buffer_base(text));
 
 	isc_buffer_free(&text);
-	return (result);
+	return result;
 }
 
 static isc_result_t
@@ -619,10 +617,10 @@ keynode_dslist_totext(dns_keynode_t *keynode, isc_buffer_t **text) {
 
 	dns_rdataset_init(&dsset);
 	if (!dns_keynode_dsset(keynode, &dsset)) {
-		return (ISC_R_SUCCESS);
+		return ISC_R_SUCCESS;
 	}
 
-	dns_name_format(keynode->name, namebuf, sizeof(namebuf));
+	dns_name_format(&keynode->name, namebuf, sizeof(namebuf));
 
 	for (result = dns_rdataset_first(&dsset); result == ISC_R_SUCCESS;
 	     result = dns_rdataset_next(&dsset))
@@ -647,12 +645,12 @@ keynode_dslist_totext(dns_keynode_t *keynode, isc_buffer_t **text) {
 		result = putstr(text, obuf);
 		if (result != ISC_R_SUCCESS) {
 			dns_rdataset_disassociate(&dsset);
-			return (result);
+			return result;
 		}
 	}
 	dns_rdataset_disassociate(&dsset);
 
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 isc_result_t
@@ -668,7 +666,7 @@ dns_keytable_totext(dns_keytable_t *keytable, isc_buffer_t **text) {
 	dns_qpmulti_query(keytable->table, &qpr);
 	dns_qpiter_init(&qpr, &iter);
 
-	while (dns_qpiter_next(&iter, &pval, NULL) == ISC_R_SUCCESS) {
+	while (dns_qpiter_next(&iter, NULL, &pval, NULL) == ISC_R_SUCCESS) {
 		dns_keynode_t *knode = pval;
 		if (knode->dslist != NULL) {
 			result = keynode_dslist_totext(knode, text);
@@ -679,7 +677,7 @@ dns_keytable_totext(dns_keytable_t *keytable, isc_buffer_t **text) {
 	}
 
 	dns_qpread_destroy(keytable->table, &qpr);
-	return (result);
+	return result;
 }
 
 void
@@ -696,9 +694,9 @@ dns_keytable_forall(dns_keytable_t *keytable,
 	dns_qpmulti_query(keytable->table, &qpr);
 	dns_qpiter_init(&qpr, &iter);
 
-	while (dns_qpiter_next(&iter, &pval, NULL) == ISC_R_SUCCESS) {
+	while (dns_qpiter_next(&iter, NULL, &pval, NULL) == ISC_R_SUCCESS) {
 		dns_keynode_t *knode = pval;
-		(*func)(keytable, knode, knode->name, arg);
+		(*func)(keytable, knode, &knode->name, arg);
 	}
 
 	dns_qpread_destroy(keytable->table, &qpr);
@@ -722,7 +720,7 @@ dns_keynode_dsset(dns_keynode_t *keynode, dns_rdataset_t *rdataset) {
 		result = false;
 	}
 	RWUNLOCK(&keynode->rwlock, isc_rwlocktype_read);
-	return (result);
+	return result;
 }
 
 bool
@@ -735,7 +733,7 @@ dns_keynode_managed(dns_keynode_t *keynode) {
 	managed = keynode->managed;
 	RWUNLOCK(&keynode->rwlock, isc_rwlocktype_read);
 
-	return (managed);
+	return managed;
 }
 
 bool
@@ -748,7 +746,7 @@ dns_keynode_initial(dns_keynode_t *keynode) {
 	initial = keynode->initial;
 	RWUNLOCK(&keynode->rwlock, isc_rwlocktype_read);
 
-	return (initial);
+	return initial;
 }
 
 void
@@ -781,10 +779,10 @@ keynode_first(dns_rdataset_t *rdataset) {
 	RWUNLOCK(&keynode->rwlock, isc_rwlocktype_read);
 
 	if (rdataset->keytable.iter == NULL) {
-		return (ISC_R_NOMORE);
+		return ISC_R_NOMORE;
 	}
 
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static isc_result_t
@@ -794,7 +792,7 @@ keynode_next(dns_rdataset_t *rdataset) {
 
 	rdata = rdataset->keytable.iter;
 	if (rdata == NULL) {
-		return (ISC_R_NOMORE);
+		return ISC_R_NOMORE;
 	}
 
 	keynode = rdataset->keytable.node;
@@ -803,10 +801,10 @@ keynode_next(dns_rdataset_t *rdataset) {
 	RWUNLOCK(&keynode->rwlock, isc_rwlocktype_read);
 
 	if (rdataset->keytable.iter == NULL) {
-		return (ISC_R_NOMORE);
+		return ISC_R_NOMORE;
 	}
 
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static void
@@ -848,7 +846,7 @@ static size_t
 qp_makekey(dns_qpkey_t key, void *uctx ISC_ATTR_UNUSED, void *pval,
 	   uint32_t ival ISC_ATTR_UNUSED) {
 	dns_keynode_t *keynode = pval;
-	return (dns_qpkey_fromname(key, keynode->name));
+	return dns_qpkey_fromname(key, &keynode->name);
 }
 
 static void

@@ -28,7 +28,9 @@ options {
 
 };
 
+trust-anchors { };
+
 zone "." {
 	type hint;
-	file "../../common/root.hint";
+	file "../../_common/root.hint";
 };

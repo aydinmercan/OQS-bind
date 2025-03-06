@@ -56,12 +56,12 @@ parse_port(const char *input) {
 	long val = strtol(input, &endptr, 10);
 
 	if ((*endptr != '\0') || (val <= 0) || (val >= 65536)) {
-		return (ISC_R_BADNUMBER);
+		return ISC_R_BADNUMBER;
 	}
 
 	port = (in_port_t)val;
 
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static isc_result_t
@@ -69,11 +69,11 @@ parse_protocol(const char *input) {
 	for (size_t i = 0; i < ARRAY_SIZE(protocols); i++) {
 		if (!strcasecmp(input, protocols[i])) {
 			protocol = i;
-			return (ISC_R_SUCCESS);
+			return ISC_R_SUCCESS;
 		}
 	}
 
-	return (ISC_R_BADNUMBER);
+	return ISC_R_BADNUMBER;
 }
 
 static isc_result_t
@@ -83,15 +83,15 @@ parse_address(const char *input) {
 
 	if (inet_pton(AF_INET6, input, &in6) == 1) {
 		isc_netaddr_fromin6(&netaddr, &in6);
-		return (ISC_R_SUCCESS);
+		return ISC_R_SUCCESS;
 	}
 
 	if (inet_pton(AF_INET, input, &in) == 1) {
 		isc_netaddr_fromin(&netaddr, &in);
-		return (ISC_R_SUCCESS);
+		return ISC_R_SUCCESS;
 	}
 
-	return (ISC_R_BADADDRESSFORM);
+	return ISC_R_BADADDRESSFORM;
 }
 
 static int
@@ -100,12 +100,12 @@ parse_workers(const char *input) {
 	long val = strtol(input, &endptr, 10);
 
 	if ((*endptr != '\0') || (val <= 0) || (val >= 128)) {
-		return (ISC_R_BADNUMBER);
+		return ISC_R_BADNUMBER;
 	}
 
 	workers = val;
 
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static void
@@ -234,7 +234,7 @@ accept_cb(isc_nmhandle_t *handle, isc_result_t eresult, void *cbarg) {
 	REQUIRE(eresult == ISC_R_SUCCESS);
 	UNUSED(cbarg);
 
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static void
@@ -248,16 +248,18 @@ run(void) {
 					  read_cb, NULL, &sock);
 		break;
 	case TCP:
-		result = isc_nm_listenstreamdns(
-			netmgr, ISC_NM_LISTEN_ALL, &sockaddr, read_cb, NULL,
-			accept_cb, NULL, 0, NULL, NULL, &sock);
+		result = isc_nm_listenstreamdns(netmgr, ISC_NM_LISTEN_ALL,
+						&sockaddr, read_cb, NULL,
+						accept_cb, NULL, 0, NULL, NULL,
+						ISC_NM_PROXY_NONE, &sock);
 		break;
 	case DOT: {
 		isc_tlsctx_createserver(NULL, NULL, &tls_ctx);
 
 		result = isc_nm_listenstreamdns(
 			netmgr, ISC_NM_LISTEN_ALL, &sockaddr, read_cb, NULL,
-			accept_cb, NULL, 0, NULL, tls_ctx, &sock);
+			accept_cb, NULL, 0, NULL, tls_ctx, ISC_NM_PROXY_NONE,
+			&sock);
 		break;
 	}
 #if HAVE_LIBNGHTTP2
@@ -273,9 +275,9 @@ run(void) {
 			eps, ISC_NM_HTTP_DEFAULT_PATH, read_cb, NULL);
 
 		if (result == ISC_R_SUCCESS) {
-			result = isc_nm_listenhttp(netmgr, ISC_NM_LISTEN_ALL,
-						   &sockaddr, 0, NULL, tls_ctx,
-						   eps, 0, &sock);
+			result = isc_nm_listenhttp(
+				netmgr, ISC_NM_LISTEN_ALL, &sockaddr, 0, NULL,
+				tls_ctx, eps, 0, ISC_NM_PROXY_NONE, &sock);
 		}
 		isc_nm_http_endpoints_detach(&eps);
 	} break;
@@ -301,5 +303,5 @@ main(int argc, char **argv) {
 
 	teardown();
 
-	exit(EXIT_SUCCESS);
+	return EXIT_SUCCESS;
 }

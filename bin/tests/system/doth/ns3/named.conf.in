@@ -11,7 +11,7 @@
  * information regarding copyright ownership.
  */
 
-include "../../common/rndc.key";
+include "../../_common/rndc.key";
 
 controls {
 	inet 10.53.0.3 port @CONTROLPORT@ allow { any; } keys { rndc_key; };
@@ -44,11 +44,14 @@ options {
 	ixfr-from-differences yes;
 	check-integrity no;
 	dnssec-validation yes;
+	max-records-per-type 0;
 };
+
+trust-anchors { };
 
 zone "." {
 	type hint;
-	file "../../common/root.hint";
+	file "../../_common/root.hint";
 };
 
 tls tls-v1.2-pfs {

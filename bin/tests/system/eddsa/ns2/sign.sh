@@ -25,14 +25,13 @@ echo_i "ns2/sign.sh"
 
 cp $infile $zonefile
 
-if [ -f ../ed25519-supported.file ]; then
+if [ $ED25519_SUPPORTED = 1 ]; then
 
-	for i in Xexample.com.+015+03613 Xexample.com.+015+35217
-	do
-		cp "$i.key" "$(echo $i.key | sed s/X/K/)"
-		cp "$i.private" "$(echo $i.private | sed s/X/K/)"
-		cat "$(echo $i.key | sed s/X/K/)" >> "$zonefile"
-	done
+  for i in Xexample.com.+015+03613 Xexample.com.+015+35217; do
+    cp "$i.key" "$(echo $i.key | sed s/X/K/)"
+    cp "$i.private" "$(echo $i.private | sed s/X/K/)"
+    cat "$(echo $i.key | sed s/X/K/)" >>"$zonefile"
+  done
 fi
 
-$SIGNER -P -z -s "$starttime" -e "$endtime" -o "$zone" "$zonefile" > /dev/null 2> signer.err || cat signer.err
+$SIGNER -P -z -s "$starttime" -e "$endtime" -o "$zone" "$zonefile" >/dev/null 2>signer.err || cat signer.err

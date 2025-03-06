@@ -32,6 +32,7 @@
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include <protobuf-c/protobuf-c.h>
 
@@ -83,7 +84,7 @@ fatal(const char *format, ...) {
 	vfprintf(stderr, format, args);
 	va_end(args);
 	fprintf(stderr, "\n");
-	exit(1);
+	_exit(EXIT_FAILURE);
 }
 
 static void
@@ -268,7 +269,8 @@ print_yaml(dns_dtdata_t *dt) {
 		}
 	}
 
-	printf("  socket_protocol: %s\n", dt->tcp ? "TCP" : "UDP");
+	printf("  socket_protocol: %s\n",
+	       dt->transport == DNS_TRANSPORT_UDP ? "UDP" : "TCP");
 
 	if (m->has_query_address) {
 		ProtobufCBinaryData *ip = &m->query_address;
@@ -336,7 +338,6 @@ int
 main(int argc, char *argv[]) {
 	isc_result_t result;
 	dns_message_t *message = NULL;
-	isc_buffer_t *b = NULL;
 	dns_dtdata_t *dt = NULL;
 	dns_dthandle_t *handle = NULL;
 	int rv = 0, ch;
@@ -361,7 +362,7 @@ main(int argc, char *argv[]) {
 			break;
 		default:
 			usage();
-			exit(1);
+			exit(EXIT_FAILURE);
 		}
 	}
 
@@ -392,17 +393,8 @@ main(int argc, char *argv[]) {
 		input.base = data;
 		input.length = datalen;
 
-		if (b != NULL) {
-			isc_buffer_free(&b);
-		}
-		isc_buffer_allocate(mctx, &b, 2048);
-		if (b == NULL) {
-			fatal("out of memory");
-		}
-
 		result = dns_dt_parse(mctx, &input, &dt);
 		if (result != ISC_R_SUCCESS) {
-			isc_buffer_free(&b);
 			continue;
 		}
 
@@ -430,9 +422,6 @@ cleanup:
 	}
 	if (message != NULL) {
 		dns_message_detach(&message);
-	}
-	if (b != NULL) {
-		isc_buffer_free(&b);
 	}
 	isc_mem_destroy(&mctx);
 

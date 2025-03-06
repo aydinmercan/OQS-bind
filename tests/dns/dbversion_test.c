@@ -78,19 +78,19 @@ setup_test(void **state) {
 
 	isc_assertion_setcallback(local_callback);
 
-	res = dns_db_create(mctx, "rbt", dns_rootname, dns_dbtype_zone,
+	res = dns_db_create(mctx, ZONEDB_DEFAULT, dns_rootname, dns_dbtype_zone,
 			    dns_rdataclass_in, 0, NULL, &db1);
 	assert_int_equal(res, ISC_R_SUCCESS);
 	dns_db_newversion(db1, &v1);
 	assert_non_null(v1);
 
-	res = dns_db_create(mctx, "rbt", dns_rootname, dns_dbtype_zone,
+	res = dns_db_create(mctx, ZONEDB_DEFAULT, dns_rootname, dns_dbtype_zone,
 			    dns_rdataclass_in, 0, NULL, &db2);
 	assert_int_equal(res, ISC_R_SUCCESS);
 	dns_db_newversion(db2, &v2);
 	assert_non_null(v1);
 
-	return (0);
+	return 0;
 }
 
 static int
@@ -119,7 +119,7 @@ teardown_test(void **state) {
 		assert_null(db2);
 	}
 
-	return (0);
+	return 0;
 }
 
 /*

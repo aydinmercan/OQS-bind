@@ -75,15 +75,15 @@ new_forwarders(isc_mem_t *mctx, const dns_name_t *name,
 	forwarders = isc_mem_get(mctx, sizeof(*forwarders));
 	*forwarders = (dns_forwarders_t){
 		.fwdpolicy = fwdpolicy,
+		.name = DNS_NAME_INITEMPTY,
 		.fwdrs = ISC_LIST_INITIALIZER,
 	};
 	isc_mem_attach(mctx, &forwarders->mctx);
 	isc_refcount_init(&forwarders->references, 1);
 
-	forwarders->name = dns_fixedname_initname(&forwarders->fn);
-	dns_name_copy(name, forwarders->name);
+	dns_name_dupwithoffsets(name, mctx, &forwarders->name);
 
-	return (forwarders);
+	return forwarders;
 }
 
 isc_result_t
@@ -123,7 +123,7 @@ dns_fwdtable_addfwd(dns_fwdtable_t *fwdtable, const dns_name_t *name,
 
 	dns_forwarders_detach(&forwarders);
 
-	return (result);
+	return result;
 }
 
 isc_result_t
@@ -155,7 +155,7 @@ dns_fwdtable_add(dns_fwdtable_t *fwdtable, const dns_name_t *name,
 
 	dns_forwarders_detach(&forwarders);
 
-	return (result);
+	return result;
 }
 
 isc_result_t
@@ -168,7 +168,7 @@ dns_fwdtable_find(dns_fwdtable_t *fwdtable, const dns_name_t *name,
 	REQUIRE(VALID_FWDTABLE(fwdtable));
 
 	dns_qpmulti_query(fwdtable->table, &qpr);
-	result = dns_qp_findname_ancestor(&qpr, name, 0, &pval, NULL);
+	result = dns_qp_lookup(&qpr, name, NULL, NULL, NULL, &pval, NULL);
 	if (result == ISC_R_SUCCESS || result == DNS_R_PARTIALMATCH) {
 		dns_forwarders_t *fwdrs = pval;
 		*forwardersp = fwdrs;
@@ -176,7 +176,7 @@ dns_fwdtable_find(dns_fwdtable_t *fwdtable, const dns_name_t *name,
 	}
 	dns_qpread_destroy(fwdtable->table, &qpr);
 
-	return (result);
+	return result;
 }
 
 void
@@ -212,6 +212,7 @@ destroy_forwarders(dns_forwarders_t *forwarders) {
 		}
 		isc_mem_put(forwarders->mctx, fwd, sizeof(*fwd));
 	}
+	dns_name_free(&forwarders->name, forwarders->mctx);
 	isc_mem_putanddetach(&forwarders->mctx, forwarders,
 			     sizeof(*forwarders));
 }
@@ -240,7 +241,7 @@ static size_t
 qp_makekey(dns_qpkey_t key, void *uctx ISC_ATTR_UNUSED, void *pval,
 	   uint32_t ival ISC_ATTR_UNUSED) {
 	dns_forwarders_t *fwd = pval;
-	return (dns_qpkey_fromname(key, fwd->name));
+	return dns_qpkey_fromname(key, &fwd->name);
 }
 
 static void

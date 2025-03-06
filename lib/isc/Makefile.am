@@ -4,8 +4,6 @@ lib_LTLIBRARIES = libisc.la
 
 libisc_ladir = $(includedir)/isc
 libisc_la_HEADERS =			\
-	include/isc/aes.h		\
-	include/isc/align.h		\
 	include/isc/ascii.h		\
 	include/isc/assertions.h	\
 	include/isc/async.h		\
@@ -34,6 +32,7 @@ libisc_la_HEADERS =			\
 	include/isc/hash.h		\
 	include/isc/hashmap.h		\
 	include/isc/heap.h		\
+	include/isc/helper.h		\
 	include/isc/hex.h		\
 	include/isc/histo.h		\
 	include/isc/hmac.h		\
@@ -65,6 +64,8 @@ libisc_la_HEADERS =			\
 	include/isc/parseint.h		\
 	include/isc/pause.h		\
 	include/isc/portset.h		\
+	include/isc/proxy2.h		\
+	include/isc/queue.h		\
 	include/isc/quota.h		\
 	include/isc/radix.h		\
 	include/isc/random.h		\
@@ -106,13 +107,14 @@ libisc_la_SOURCES =		\
 	$(libisc_la_HEADERS)	\
 	netmgr/netmgr-int.h	\
 	netmgr/netmgr.c		\
+	netmgr/proxystream.c	\
+	netmgr/proxyudp.c	\
 	netmgr/socket.c		\
 	netmgr/streamdns.c	\
 	netmgr/tcp.c		\
 	netmgr/timer.c		\
 	netmgr/tlsstream.c	\
 	netmgr/udp.c		\
-	aes.c			\
 	ascii.c			\
 	assertions.c		\
 	async.c			\
@@ -136,6 +138,7 @@ libisc_la_SOURCES =		\
 	hash.c			\
 	hashmap.c		\
 	heap.c			\
+	helper.c		\
 	hex.c			\
 	histo.c			\
 	hmac.c			\
@@ -172,6 +175,7 @@ libisc_la_SOURCES =		\
 	picohttpparser.h	\
 	portset.c		\
 	probes.d		\
+	proxy2.c		\
 	quota.c			\
 	radix.c			\
 	random.c		\
@@ -182,7 +186,6 @@ libisc_la_SOURCES =		\
 	safe.c			\
 	serial.c		\
 	signal.c		\
-	siphash.c		\
 	sockaddr.c		\
 	stats.c			\
 	stdio.c			\

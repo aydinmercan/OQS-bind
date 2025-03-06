@@ -13,12 +13,15 @@ named.run
 /random.data
 /*.log
 /*.trs
+/*.xml
 /resolve
 /legacy.run.sh
 /run.log
 /start.sh
 /stop.sh
 /ifconfig.sh
+/isctest/vars/.ac_vars/*
+!/isctest/vars/.ac_vars/*.in
 
 # Ignore file names with underscore in their name except python or shell files.
 # This is done to ignore the temporary directories and symlinks created by the
@@ -26,3 +29,4 @@ named.run
 /*_*
 !/*_*.py
 !/*_*.sh
+!/_common

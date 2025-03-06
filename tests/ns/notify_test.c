@@ -43,7 +43,7 @@ check_response(isc_buffer_t *buf) {
 	char rcodebuf[20];
 	isc_buffer_t b;
 
-	dns_message_create(mctx, DNS_MESSAGE_INTENTPARSE, &message);
+	dns_message_create(mctx, NULL, NULL, DNS_MESSAGE_INTENTPARSE, &message);
 
 	result = dns_message_parse(message, buf, 0);
 	assert_int_equal(result, ISC_R_SUCCESS);
@@ -67,8 +67,7 @@ ISC_LOOP_TEST_IMPL(notify_start) {
 	isc_buffer_t nbuf;
 	size_t nsize;
 
-	result = ns_test_getclient(NULL, false, &client);
-	assert_int_equal(result, ISC_R_SUCCESS);
+	ns_test_getclient(NULL, false, &client);
 
 	result = dns_test_makeview("view", false, false, &client->view);
 	assert_int_equal(result, ISC_R_SUCCESS);
@@ -89,7 +88,7 @@ ISC_LOOP_TEST_IMPL(notify_start) {
 	isc_buffer_init(&nbuf, ndata, nsize);
 	isc_buffer_add(&nbuf, nsize);
 
-	dns_message_create(mctx, DNS_MESSAGE_INTENTPARSE, &nmsg);
+	dns_message_create(mctx, NULL, NULL, DNS_MESSAGE_INTENTPARSE, &nmsg);
 
 	result = dns_message_parse(nmsg, &nbuf, 0);
 	assert_int_equal(result, ISC_R_SUCCESS);

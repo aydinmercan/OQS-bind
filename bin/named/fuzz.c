@@ -128,7 +128,7 @@ fuzz_thread_client(void *arg) {
 				named_server_flushonshutdown(named_g_server,
 							     false);
 				isc_loopmgr_shutdown(named_g_loopmgr);
-				return (NULL);
+				return NULL;
 			}
 			raise(SIGSTOP);
 			goto next;
@@ -162,7 +162,7 @@ fuzz_thread_client(void *arg) {
 	named_server_flushonshutdown(named_g_server, false);
 	isc_loopmgr_shutdown(named_g_loopmgr);
 
-	return (NULL);
+	return NULL;
 }
 
 /*
@@ -377,7 +377,7 @@ fuzz_thread_resolver(void *arg) {
 				named_server_flushonshutdown(named_g_server,
 							     false);
 				isc_loopmgr_shutdown(named_g_loopmgr);
-				return (NULL);
+				return NULL;
 			}
 			raise(SIGSTOP);
 			continue;
@@ -589,7 +589,7 @@ fuzz_thread_resolver(void *arg) {
 	__AFL_LOOP(0);
 #endif /* ifdef __AFL_LOOP */
 
-	return (NULL);
+	return NULL;
 }
 
 /*
@@ -720,7 +720,7 @@ fuzz_thread_tcp(void *arg) {
 	named_server_flushonshutdown(named_g_server, false);
 	isc_loopmgr_shutdown(named_g_loopmgr);
 
-	return (NULL);
+	return NULL;
 }
 
 #endif /* ENABLE_AFL */

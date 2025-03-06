@@ -43,11 +43,6 @@
  * Records are stored internally until a timer expires. The timer is the
  * smaller of the TTL or signature validity period.
  *
- * Lameness is stored per <qname,qtype> tuple, and this data hangs off each
- * address field.  When an address is marked lame for a given tuple the address
- * will not be returned to a caller.
- *
- *
  * MP:
  *
  *\li	The ADB takes care of all necessary locking.
@@ -66,8 +61,7 @@
  *** Imports
  ***/
 
-/* Define to 1 for detailed reference tracing */
-#undef DNS_ADB_TRACE
+/* Add -DDNS_ADB_TRACE=1 to CFLAGS for detailed reference tracing */
 
 #include <inttypes.h>
 #include <stdbool.h>
@@ -127,15 +121,15 @@ struct dns_adbfind {
 	ISC_LINK(dns_adbfind_t) publink;      /*%< RW: client use */
 
 	/* Private */
-	isc_mutex_t	lock; /* locks all below */
-	in_port_t	port;
-	unsigned int	flags;
-	dns_adbname_t  *adbname;
-	dns_adb_t      *adb;
-	isc_loop_t     *loop;
-	dns_adbstatus_t status;
-	isc_job_cb	cb;
-	void	       *cbarg;
+	isc_mutex_t		 lock; /* locks all below */
+	in_port_t		 port;
+	unsigned int		 flags;
+	dns_adbname_t		*adbname;
+	dns_adb_t		*adb;
+	isc_loop_t		*loop;
+	_Atomic(dns_adbstatus_t) status;
+	isc_job_cb		 cb;
+	void			*cbarg;
 	ISC_LINK(dns_adbfind_t) plink;
 };
 
@@ -159,13 +153,6 @@ struct dns_adbfind {
  * _STARTATZONE:
  *	Fetches will start using the closest zone data or use the root servers.
  *	This is useful for reestablishing glue that has expired.
- *
- * _RETURNLAME:
- *	Return lame servers in a find, so that all addresses are returned.
- *
- * _LAMEPRUNED:
- *	At least one address was omitted from the list because it was lame.
- *	This bit will NEVER be set if _RETURNLAME is set in the createfind().
  */
 /*% Return addresses of type INET. */
 #define DNS_ADBFIND_INET 0x00000001
@@ -193,14 +180,9 @@ struct dns_adbfind {
  */
 #define DNS_ADBFIND_STARTATZONE 0x00000020
 /*%
- *	Return lame servers in a find, so that all addresses are returned.
+ *	Fetches will be exempted from the quota.
  */
-#define DNS_ADBFIND_RETURNLAME 0x00000100
-/*%
- *      Only schedule an event if no addresses are known.
- *      Must set _WANTEVENT for this to be meaningful.
- */
-#define DNS_ADBFIND_LAMEPRUNED 0x00000200
+#define DNS_ADBFIND_QUOTAEXEMPT 0x00000040
 /*%
  *      The server's fetch quota is exceeded; it will be treated as
  *      lame for this query.
@@ -210,6 +192,10 @@ struct dns_adbfind {
  *	Don't perform a fetch even if there are no address records available.
  */
 #define DNS_ADBFIND_NOFETCH 0x00000800
+/*%
+ *	Only look for glue record for static stub.
+ */
+#define DNS_ADBFIND_STATICSTUB 0x00001000
 
 /*%
  * The answers to queries come back as a list of these.
@@ -247,12 +233,11 @@ struct dns_adbaddrinfo {
  */
 
 /****
-**** FUNCTIONS
-****/
+ **** FUNCTIONS
+ ****/
 
 void
-dns_adb_create(isc_mem_t *mem, dns_view_t *view, isc_loopmgr_t *loopmgr,
-	       dns_adb_t **newadb);
+dns_adb_create(isc_mem_t *mem, dns_view_t *view, dns_adb_t **newadb);
 /*%<
  * Create a new ADB.
  *
@@ -266,8 +251,6 @@ dns_adb_create(isc_mem_t *mem, dns_view_t *view, isc_loopmgr_t *loopmgr,
  *\li	'mem' must be a valid memory context.
  *
  *\li	'view' be a pointer to a valid view.
- *
- *\li	'loopmgr' be a valid loop manager.
  *
  *\li	'newadb' != NULL && '*newadb' == NULL.
  */
@@ -298,7 +281,8 @@ dns_adb_createfind(dns_adb_t *adb, isc_loop_t *loop, isc_job_cb cb, void *cbarg,
 		   const dns_name_t *name, const dns_name_t *qname,
 		   dns_rdatatype_t qtype, unsigned int options,
 		   isc_stdtime_t now, dns_name_t *target, in_port_t port,
-		   unsigned int depth, isc_counter_t *qc, dns_adbfind_t **find);
+		   unsigned int depth, isc_counter_t *qc, isc_counter_t *gqc,
+		   dns_adbfind_t **find);
 /*%<
  * Main interface for clients. The adb will look up the name given in
  * "name" and will build up a list of found addresses, and perhaps start
@@ -320,8 +304,7 @@ dns_adb_createfind(dns_adb_t *adb, isc_loop_t *loop, isc_job_cb cb, void *cbarg,
  *
  * The list of addresses returned is unordered.  The caller must impose
  * any ordering required.  The list will not contain "known bad" addresses,
- * however.  For instance, it will not return hosts that are known to be
- * lame for the zone in question.
+ * however.
  *
  * The caller cannot (directly) modify the contents of the address list's
  * fields other than the "link" field.  All values can be read at any
@@ -409,6 +392,16 @@ dns_adbfind_done(dns_adbfind_t find);
  *\li	'find' != NULL and *find be valid dns_adbfind_t pointer.
  */
 
+unsigned int
+dns_adb_findstatus(dns_adbfind_t *);
+/*%<
+ * Returns the status field of the find.
+ *
+ * Requires:
+ *
+ *\li	'find' be a valid dns_adbfind_t pointer.
+ */
+
 void
 dns_adb_destroyfind(dns_adbfind_t **find);
 /*%<
@@ -439,29 +432,6 @@ dns_adb_dump(dns_adb_t *adb, FILE *f);
  *\li	adb is valid.
  *
  *\li	f != NULL, and is a file open for writing.
- */
-
-isc_result_t
-dns_adb_marklame(dns_adb_t *adb, dns_adbaddrinfo_t *addr,
-		 const dns_name_t *qname, dns_rdatatype_t type,
-		 isc_stdtime_t expire_time);
-/*%<
- * Mark the given address as lame for the <qname,qtype>.  expire_time should
- * be set to the time when the entry should expire.  That is, if it is to
- * expire 10 minutes in the future, it should set it to (now + 10 * 60).
- *
- * Requires:
- *
- *\li	adb be valid.
- *
- *\li	addr be valid.
- *
- *\li	qname be the qname used in the dns_adb_createfind() call.
- *
- * Returns:
- *
- *\li	#ISC_R_SUCCESS		-- all is well.
- *\li	#ISC_R_NOMEMORY		-- could not mark address as lame.
  */
 
 /*

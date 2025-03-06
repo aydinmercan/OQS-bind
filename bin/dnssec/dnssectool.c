@@ -20,6 +20,7 @@
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include <isc/base32.h>
 #include <isc/buffer.h>
@@ -83,8 +84,7 @@ fatal(const char *format, ...) {
 	if (fatalcallback != NULL) {
 		(*fatalcallback)();
 	}
-	isc__tls_setfatalmode();
-	exit(1);
+	_exit(EXIT_FAILURE);
 }
 
 void
@@ -114,7 +114,7 @@ vbprintf(int level, const char *fmt, ...) {
 void
 version(const char *name) {
 	printf("%s %s\n", name, PACKAGE_VERSION);
-	exit(0);
+	exit(EXIT_SUCCESS);
 }
 
 void
@@ -202,16 +202,16 @@ time_units(isc_stdtime_t offset, char *suffix, const char *str) {
 	switch (suffix[0]) {
 	case 'Y':
 	case 'y':
-		return (offset * (365 * 24 * 3600));
+		return offset * (365 * 24 * 3600);
 	case 'M':
 	case 'm':
 		switch (suffix[1]) {
 		case 'O':
 		case 'o':
-			return (offset * (30 * 24 * 3600));
+			return offset * (30 * 24 * 3600);
 		case 'I':
 		case 'i':
-			return (offset * 60);
+			return offset * 60;
 		case '\0':
 			fatal("'%s' ambiguous: use 'mi' for minutes "
 			      "or 'mo' for months",
@@ -223,29 +223,29 @@ time_units(isc_stdtime_t offset, char *suffix, const char *str) {
 		break;
 	case 'W':
 	case 'w':
-		return (offset * (7 * 24 * 3600));
+		return offset * (7 * 24 * 3600);
 	case 'D':
 	case 'd':
-		return (offset * (24 * 3600));
+		return offset * (24 * 3600);
 	case 'H':
 	case 'h':
-		return (offset * 3600);
+		return offset * 3600;
 	case 'S':
 	case 's':
 	case '\0':
-		return (offset);
+		return offset;
 	default:
 		fatal("time value %s is invalid", str);
 	}
 	UNREACHABLE();
-	return (0); /* silence compiler warning */
+	return 0; /* silence compiler warning */
 }
 
 static bool
 isnone(const char *str) {
-	return ((strcasecmp(str, "none") == 0) ||
-		(strcasecmp(str, "never") == 0) ||
-		(strcasecmp(str, "unset") == 0));
+	return (strcasecmp(str, "none") == 0) ||
+	       (strcasecmp(str, "never") == 0) ||
+	       (strcasecmp(str, "unset") == 0);
 }
 
 dns_ttl_t
@@ -255,7 +255,7 @@ strtottl(const char *str) {
 	char *endp;
 
 	if (isnone(str)) {
-		return ((dns_ttl_t)0);
+		return (dns_ttl_t)0;
 	}
 
 	ttl = strtol(str, &endp, 0);
@@ -263,19 +263,19 @@ strtottl(const char *str) {
 		fatal("TTL must be numeric");
 	}
 	ttl = time_units(ttl, endp, orig);
-	return (ttl);
+	return ttl;
 }
 
 dst_key_state_t
 strtokeystate(const char *str) {
 	if (isnone(str)) {
-		return (DST_KEY_STATE_NA);
+		return DST_KEY_STATE_NA;
 	}
 
 	for (int i = 0; i < KEYSTATES_NVALUES; i++) {
 		if (keystates[i] != NULL && strcasecmp(str, keystates[i]) == 0)
 		{
-			return ((dst_key_state_t)i);
+			return (dst_key_state_t)i;
 		}
 	}
 	fatal("unknown key state %s", str);
@@ -292,13 +292,13 @@ strtotime(const char *str, int64_t now, int64_t base, bool *setp) {
 
 	if (isnone(str)) {
 		SET_IF_NOT_NULL(setp, false);
-		return ((isc_stdtime_t)0);
+		return (isc_stdtime_t)0;
 	}
 
 	SET_IF_NOT_NULL(setp, true);
 
 	if ((str[0] == '0' || str[0] == '-') && str[1] == '\0') {
-		return ((isc_stdtime_t)0);
+		return (isc_stdtime_t)0;
 	}
 
 	/*
@@ -347,7 +347,7 @@ strtotime(const char *str, int64_t now, int64_t base, bool *setp) {
 	}
 
 	if (str[0] == '\0') {
-		return ((isc_stdtime_t)base);
+		return (isc_stdtime_t)base;
 	} else if (str[0] == '+') {
 		offset = strtol(str + 1, &endp, 0);
 		offset = time_units((isc_stdtime_t)offset, endp, orig);
@@ -360,7 +360,7 @@ strtotime(const char *str, int64_t now, int64_t base, bool *setp) {
 		fatal("time value %s is invalid", orig);
 	}
 
-	return ((isc_stdtime_t)val);
+	return (isc_stdtime_t)val;
 }
 
 dns_rdataclass_t
@@ -370,7 +370,7 @@ strtoclass(const char *str) {
 	isc_result_t result;
 
 	if (str == NULL) {
-		return (dns_rdataclass_in);
+		return dns_rdataclass_in;
 	}
 	r.base = UNCONST(str);
 	r.length = strlen(str);
@@ -378,7 +378,7 @@ strtoclass(const char *str) {
 	if (result != ISC_R_SUCCESS) {
 		fatal("unknown class %s", str);
 	}
-	return (rdclass);
+	return rdclass;
 }
 
 unsigned int
@@ -393,14 +393,14 @@ strtodsdigest(const char *str) {
 	if (result != ISC_R_SUCCESS) {
 		fatal("unknown DS algorithm %s", str);
 	}
-	return (alg);
+	return alg;
 }
 
 static int
 cmp_dtype(const void *ap, const void *bp) {
 	int a = *(const uint8_t *)ap;
 	int b = *(const uint8_t *)bp;
-	return (a - b);
+	return a - b;
 }
 
 void
@@ -432,7 +432,7 @@ try_dir(const char *dirname) {
 	if (result == ISC_R_SUCCESS) {
 		isc_dir_close(&d);
 	}
-	return (result);
+	return result;
 }
 
 /*
@@ -479,7 +479,7 @@ set_keyversion(dst_key_t *key) {
 
 bool
 key_collision(dst_key_t *dstkey, dns_name_t *name, const char *dir,
-	      isc_mem_t *mctx, bool *exact) {
+	      isc_mem_t *mctx, uint16_t min, uint16_t max, bool *exact) {
 	isc_result_t result;
 	bool conflict = false;
 	dns_dnsseckeylist_t matchkeys;
@@ -489,18 +489,32 @@ key_collision(dst_key_t *dstkey, dns_name_t *name, const char *dir,
 	dns_secalg_t alg;
 	isc_stdtime_t now = isc_stdtime_now();
 
-	if (exact != NULL) {
-		*exact = false;
-	}
+	SET_IF_NOT_NULL(exact, false);
 
 	id = dst_key_id(dstkey);
 	rid = dst_key_rid(dstkey);
 	alg = dst_key_alg(dstkey);
 
+	if (min != max) {
+		if (id < min || id > max) {
+			fprintf(stderr, "Key ID %d outside of [%u..%u]\n", id,
+				min, max);
+			return true;
+		}
+		if (rid < min || rid > max) {
+			fprintf(stderr,
+				"Revoked Key ID %d (for tag %d) outside of "
+				"[%u..%u]\n",
+				rid, id, min, max);
+			return true;
+		}
+	}
+
 	ISC_LIST_INIT(matchkeys);
-	result = dns_dnssec_findmatchingkeys(name, dir, now, mctx, &matchkeys);
+	result = dns_dnssec_findmatchingkeys(name, NULL, dir, NULL, now, mctx,
+					     &matchkeys);
 	if (result == ISC_R_NOTFOUND) {
-		return (false);
+		return false;
 	}
 	while (!ISC_LIST_EMPTY(matchkeys) && !conflict) {
 		key = ISC_LIST_HEAD(matchkeys);
@@ -543,7 +557,7 @@ key_collision(dst_key_t *dstkey, dns_name_t *name, const char *dir,
 		dns_dnsseckey_destroy(mctx, &key);
 	}
 
-	return (conflict);
+	return conflict;
 }
 
 bool
@@ -558,9 +572,9 @@ isoptarg(const char *arg, char **argv, void (*usage)(void)) {
 		isc_commandline_argument = argv[isc_commandline_index];
 		/* skip to next argument */
 		isc_commandline_index++;
-		return (true);
+		return true;
 	}
-	return (false);
+	return false;
 }
 
 void
@@ -599,4 +613,89 @@ loadjournal(isc_mem_t *mctx, dns_db_t *db, const char *file) {
 
 cleanup:
 	dns_journal_destroy(&jnl);
+}
+
+void
+kasp_from_conf(cfg_obj_t *config, isc_mem_t *mctx, isc_log_t *lctx,
+	       const char *name, const char *keydir, const char *engine,
+	       dns_kasp_t **kaspp) {
+	isc_result_t result = ISC_R_NOTFOUND;
+	const cfg_listelt_t *element;
+	const cfg_obj_t *kasps = NULL;
+	dns_kasp_t *kasp = NULL, *kasp_next;
+	dns_kasplist_t kasplist;
+	const cfg_obj_t *keystores = NULL;
+	dns_keystore_t *ks = NULL, *ks_next;
+	dns_keystorelist_t kslist;
+
+	ISC_LIST_INIT(kasplist);
+	ISC_LIST_INIT(kslist);
+
+	(void)cfg_map_get(config, "key-store", &keystores);
+	for (element = cfg_list_first(keystores); element != NULL;
+	     element = cfg_list_next(element))
+	{
+		cfg_obj_t *kconfig = cfg_listelt_value(element);
+		ks = NULL;
+		result = cfg_keystore_fromconfig(kconfig, mctx, lctx, engine,
+						 &kslist, NULL);
+		if (result != ISC_R_SUCCESS) {
+			fatal("failed to configure key-store '%s': %s",
+			      cfg_obj_asstring(cfg_tuple_get(kconfig, "name")),
+			      isc_result_totext(result));
+		}
+	}
+	/* Default key-directory key store. */
+	ks = NULL;
+	(void)cfg_keystore_fromconfig(NULL, mctx, lctx, engine, &kslist, &ks);
+	INSIST(ks != NULL);
+	if (keydir != NULL) {
+		/* '-K keydir' takes priority */
+		dns_keystore_setdirectory(ks, keydir);
+	}
+	dns_keystore_detach(&ks);
+
+	(void)cfg_map_get(config, "dnssec-policy", &kasps);
+	for (element = cfg_list_first(kasps); element != NULL;
+	     element = cfg_list_next(element))
+	{
+		cfg_obj_t *kconfig = cfg_listelt_value(element);
+		kasp = NULL;
+		if (strcmp(cfg_obj_asstring(cfg_tuple_get(kconfig, "name")),
+			   name) != 0)
+		{
+			continue;
+		}
+
+		result = cfg_kasp_fromconfig(kconfig, NULL, true, mctx, lctx,
+					     &kslist, &kasplist, &kasp);
+		if (result != ISC_R_SUCCESS) {
+			fatal("failed to configure dnssec-policy '%s': %s",
+			      cfg_obj_asstring(cfg_tuple_get(kconfig, "name")),
+			      isc_result_totext(result));
+		}
+		INSIST(kasp != NULL);
+		dns_kasp_freeze(kasp);
+		break;
+	}
+
+	*kaspp = kasp;
+
+	/*
+	 * Cleanup kasp list.
+	 */
+	for (kasp = ISC_LIST_HEAD(kasplist); kasp != NULL; kasp = kasp_next) {
+		kasp_next = ISC_LIST_NEXT(kasp, link);
+		ISC_LIST_UNLINK(kasplist, kasp, link);
+		dns_kasp_detach(&kasp);
+	}
+
+	/*
+	 * Cleanup keystore list.
+	 */
+	for (ks = ISC_LIST_HEAD(kslist); ks != NULL; ks = ks_next) {
+		ks_next = ISC_LIST_NEXT(ks, link);
+		ISC_LIST_UNLINK(kslist, ks, link);
+		dns_keystore_detach(&ks);
+	}
 }

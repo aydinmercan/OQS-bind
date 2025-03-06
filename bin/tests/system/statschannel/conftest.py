@@ -10,16 +10,10 @@
 # information regarding copyright ownership.
 
 import os
+
 import pytest
 
 
-@pytest.fixture
-def statsport(request):
-    # pylint: disable=unused-argument
-    env_port = os.getenv("EXTRAPORT1")
-    if env_port is None:
-        env_port = 5301
-    else:
-        env_port = int(env_port)
-
-    return env_port
+@pytest.fixture(scope="module")
+def statsport():
+    return int(os.environ["EXTRAPORT1"])

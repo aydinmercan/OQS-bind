@@ -487,6 +487,10 @@ dst_key_tofile(const dst_key_t *key, int type, const char *directory);
  */
 
 isc_result_t
+dst_key_fromdns_ex(const dns_name_t *name, dns_rdataclass_t rdclass,
+		   isc_buffer_t *source, isc_mem_t *mctx, bool no_rdata,
+		   dst_key_t **keyp);
+isc_result_t
 dst_key_fromdns(const dns_name_t *name, dns_rdataclass_t rdclass,
 		isc_buffer_t *source, isc_mem_t *mctx, dst_key_t **keyp);
 /*%<
@@ -634,8 +638,8 @@ dst_key_fromlabel(const dns_name_t *name, int alg, unsigned int flags,
 isc_result_t
 dst_key_generate(const dns_name_t *name, unsigned int alg, unsigned int bits,
 		 unsigned int param, unsigned int flags, unsigned int protocol,
-		 dns_rdataclass_t rdclass, isc_mem_t *mctx, dst_key_t **keyp,
-		 void (*callback)(int));
+		 dns_rdataclass_t rdclass, const char *label, isc_mem_t *mctx,
+		 dst_key_t **keyp, void (*callback)(int));
 
 /*%<
  * Generate a DST key (or keypair) with the supplied parameters.  The
@@ -769,6 +773,9 @@ dst_key_rid(const dst_key_t *key);
 
 dns_rdataclass_t
 dst_key_class(const dst_key_t *key);
+
+const char *
+dst_key_directory(const dst_key_t *key);
 
 bool
 dst_key_isprivate(const dst_key_t *key);
@@ -1236,6 +1243,15 @@ dst_key_copy_metadata(dst_key_t *to, dst_key_t *from);
  *
  * Requires:
  *	'to' and 'from' to be valid.
+ */
+
+void
+dst_key_setdirectory(dst_key_t *key, const char *dir);
+/*%<
+ * Set the directory where to store key files for this key.
+ *
+ * Requires:
+ *	'key' to be valid.
  */
 
 const char *

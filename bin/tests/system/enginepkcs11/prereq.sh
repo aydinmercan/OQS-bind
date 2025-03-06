@@ -13,20 +13,24 @@
 
 . ../conf.sh
 
-[ -n "${SOFTHSM2_CONF}" ] || {
-    echo_i "skip: softhsm2 configuration not available"
-    exit 255
+[ "prereq/var/tmp/etc/openssl-provider.cnf" = "prereq${OPENSSL_CONF}" ] || {
+  echo_i "skip: pkcs11-provider not enabled"
+  exit 255
 }
 
-parse_openssl_config
+[ -n "${SOFTHSM2_CONF}" ] || {
+  echo_i "skip: softhsm2 configuration not available"
+  exit 255
+}
+
 [ -f "$SOFTHSM2_MODULE" ] || {
-    echo_i "skip: softhsm2 module not available"
-    exit 1
+  echo_i "skip: softhsm2 module not available"
+  exit 1
 }
 
 for _bin in softhsm2-util pkcs11-tool; do
-    command -v "$_bin" >/dev/null || {
-        echo_i "skip: $_bin not available"
-        exit 1
-    }
+  command -v "$_bin" >/dev/null || {
+    echo_i "skip: $_bin not available"
+    exit 1
+  }
 done

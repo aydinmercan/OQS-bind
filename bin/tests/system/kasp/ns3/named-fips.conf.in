@@ -39,6 +39,11 @@ controls {
         inet 10.53.0.3 port @CONTROLPORT@ allow { any; } keys { rndc_key; };
 };
 
+zone "." {
+	type hint;
+	file "../../_common/root.hint.blackhole";
+};
+
 /* Zones that are getting initially signed */
 
 /* The default case: No keys created, using default policy. */
@@ -46,6 +51,14 @@ zone "default.kasp" {
 	type primary;
 	file "default.kasp.db";
 	dnssec-policy "default";
+};
+
+/* A zone with special characters. */
+zone "i-am.\":\;?&[]\@!\$*+,|=\.\(\)special.kasp." {
+        type primary;
+        file "i-am.special.kasp.db";
+        check-names ignore;
+        dnssec-policy "default";
 };
 
 /* checkds: Zone with one KSK. */
@@ -134,11 +147,31 @@ zone "dynamic-inline-signing.kasp" {
 	allow-update { any; };
 };
 
+/*
+ * A dynamic inline-signed zone with dnssec-policy with DNSSEC records in the
+ * raw version of the zone.
+ */
+zone "dynamic-signed-inline-signing.kasp" {
+	type primary;
+	file "dynamic-signed-inline-signing.kasp.db.signed";
+	key-directory "keys";
+	dnssec-policy "default";
+	allow-update { any; };
+};
+
 /* An inline-signed zone with dnssec-policy. */
 zone "inline-signing.kasp" {
 	type primary;
 	file "inline-signing.kasp.db";
 	dnssec-policy "default";
+};
+
+/* A zone that uses dnssec-policy with key stores. */
+zone "keystore.kasp" {
+	type primary;
+	file "keystore.kasp.db";
+	inline-signing yes;
+	dnssec-policy "keystore";
 };
 
 /*
@@ -182,6 +215,17 @@ zone "rumoured.kasp" {
 zone "multisigner-model2.kasp" {
 	type primary;
 	file "multisigner-model2.kasp.db";
+	dnssec-policy "multisigner-model2";
+	allow-update { any; };
+};
+
+/*
+ * A zone that starts with keys that have tags that are
+ * outside of the desired multi-signer key tag range.
+ */
+zone "single-to-multisigner.kasp" {
+	type primary;
+	file "single-to-multisigner.kasp.db";
 	dnssec-policy "multisigner-model2";
 	allow-update { any; };
 };
@@ -244,6 +288,15 @@ zone "expired-sigs.autosign" {
 };
 
 /*
+ * Zone that has DNSKEY TTL mismatch with the dnssec-policy.
+ */
+zone "dnskey-ttl-mismatch.autosign" {
+	type primary;
+	file "dnskey-ttl-mismatch.autosign.db";
+	dnssec-policy "autosign";
+};
+
+/*
  * Zone that has valid, fresh signatures.
  */
 zone "fresh-sigs.autosign" {
@@ -258,6 +311,15 @@ zone "fresh-sigs.autosign" {
 zone "unfresh-sigs.autosign" {
 	type primary;
 	file "unfresh-sigs.autosign.db";
+	dnssec-policy "autosign";
+};
+
+/*
+ * Zone that has missing key files.
+ */
+zone "keyfiles-missing.autosign" {
+	type primary;
+	file "keyfiles-missing.autosign.db";
 	dnssec-policy "autosign";
 };
 

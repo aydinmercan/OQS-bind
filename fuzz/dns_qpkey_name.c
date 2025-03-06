@@ -34,7 +34,7 @@ int
 LLVMFuzzerInitialize(int *argc, char ***argv) {
 	UNUSED(argc);
 	UNUSED(argv);
-	return (0);
+	return 0;
 }
 
 int
@@ -56,7 +56,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
 	/* verify round-trip conversion of first name */
 	size_t keylen = dns_qpkey_fromname(key, namein);
-	qp_test_keytoname(key, keylen, nameout);
+	dns_qpkey_toname(key, keylen, nameout);
 
 	assert(dns_name_equal(namein, nameout));
 
@@ -73,5 +73,5 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 	assert((namerel == 0) == (keyrel == 0));
 	assert((namerel > 0) == (keyrel > 0));
 
-	return (0);
+	return 0;
 }

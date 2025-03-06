@@ -37,6 +37,15 @@ typedef struct ns_dbversion {
 	ISC_LINK(struct ns_dbversion) link;
 } ns_dbversion_t;
 
+/* DB lookup options */
+typedef struct dns_getdb_options {
+	bool noexact	: 1;
+	bool nolog	: 1;
+	bool partial	: 1;
+	bool ignoreacl	: 1;
+	bool stalefirst : 1;
+} dns_getdb_options_t;
+
 /*%
  * recursion type; various features can initiate recursion and this enum value
  * allows common code paths to differentiate between them
@@ -96,6 +105,7 @@ typedef struct ns_query_recparam {
 struct ns_query {
 	unsigned int	 attributes;
 	unsigned int	 restarts;
+	isc_counter_t	*qc;
 	bool		 timerset;
 	dns_name_t	*qname;
 	dns_name_t	*origqname;
@@ -165,7 +175,6 @@ struct ns_query {
 #define NS_QUERYATTR_REDIRECT	     0x020000
 #define NS_QUERYATTR_ANSWERED	     0x040000
 #define NS_QUERYATTR_STALEOK	     0x080000
-#define NS_QUERYATTR_STALEPENDING    0x100000
 
 typedef struct query_ctx query_ctx_t;
 
@@ -183,7 +192,7 @@ struct query_ctx {
 	dns_rdatatype_t qtype;
 	dns_rdatatype_t type;
 
-	unsigned int options; /* DB lookup options */
+	dns_getdb_options_t options; /* DB lookup options */
 
 	bool redirected; /* nxdomain redirected? */
 	bool is_zone;	 /* is DB a zone DB? */
@@ -203,6 +212,7 @@ struct query_ctx {
 
 	ns_client_t *client;	    /* client object */
 	bool	     detach_client; /* client needs detaching */
+	bool	     async;	    /* asynchronous hook running */
 
 	dns_fetchresponse_t *fresp; /* recursion response */
 
@@ -288,7 +298,7 @@ ns_query_hookasync(query_ctx_t *qctx, ns_query_starthookasync_t runasync,
  * other aspects of hook-triggered asynchronous event handling.
  */
 
-isc_result_t
+void
 ns_query_init(ns_client_t *client);
 
 void

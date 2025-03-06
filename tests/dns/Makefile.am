@@ -24,9 +24,11 @@ check_PROGRAMS =		\
 	dbdiff_test		\
 	dbiterator_test		\
 	dbversion_test		\
+	diff_test		\
 	dispatch_test		\
 	dns64_test		\
 	dst_test		\
+	ede_test		\
 	keytable_test		\
 	name_test		\
 	nametree_test		\
@@ -35,14 +37,17 @@ check_PROGRAMS =		\
 	private_test		\
 	qp_test			\
 	qpmulti_test		\
+	qpdb_test		\
+	qpzone_test		\
 	rbt_test		\
-	rbtdb_test		\
 	rdata_test		\
 	rdataset_test		\
 	rdatasetstats_test	\
+	resconf_test		\
 	resolver_test		\
 	rsa_test		\
 	sigs_test		\
+	skr_test		\
 	time_test		\
 	tsig_test		\
 	update_test		\

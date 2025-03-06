@@ -60,7 +60,7 @@ ISC_LANG_BEGINDECLS
 
 #define DNS_RDATASLAB_OFFLINE 0x01 /* RRSIG is for offline DNSKEY */
 
-struct dns_proof {
+struct dns_slabheader_proof {
 	dns_name_t	name;
 	void	       *neg;
 	void	       *negsig;
@@ -68,34 +68,35 @@ struct dns_proof {
 };
 
 struct dns_slabheader {
+	_Atomic(uint16_t) attributes;
+
 	/*%
 	 * Locked by the owning node's lock.
 	 */
-	uint32_t	      serial;
-	dns_ttl_t	      ttl;
-	dns_typepair_t	      type;
-	atomic_uint_least16_t attributes;
-	dns_trust_t	      trust;
+	dns_trust_t    trust;
+	uint32_t       serial;
+	dns_ttl_t      ttl;
+	dns_typepair_t type;
 
-	unsigned int heap_index;
-	/*%<
-	 * Used for TTL-based cache cleaning.
-	 */
-
-	isc_stdtime_t resign;
-	unsigned int  resign_lsb : 1;
-
-	atomic_uint_fast16_t count;
+	_Atomic(uint16_t) count;
 	/*%<
 	 * Monotonically increased every time this rdataset is bound so that
 	 * it is used as the base of the starting point in DNS responses
 	 * when the "cyclic" rrset-order is required.
 	 */
 
-	atomic_uint_fast32_t last_refresh_fail_ts;
+	unsigned int  resign_lsb : 1;
+	isc_stdtime_t resign;
+	unsigned int  heap_index;
+	/*%<
+	 * Used for TTL-based cache cleaning.
+	 */
 
-	dns_proof_t *noqname;
-	dns_proof_t *closest;
+	isc_stdtime_t	  last_used;
+	_Atomic(uint32_t) last_refresh_fail_ts;
+
+	dns_slabheader_proof_t *noqname;
+	dns_slabheader_proof_t *closest;
 	/*%<
 	 * We don't use the LIST macros, because the LIST structure has
 	 * both head and tail pointers, and is doubly linked.
@@ -122,7 +123,6 @@ struct dns_slabheader {
 	 * this rdataset, if any.
 	 */
 
-	isc_stdtime_t last_used;
 	ISC_LINK(struct dns_slabheader) link;
 
 	/*%
@@ -132,9 +132,9 @@ struct dns_slabheader {
 	 */
 	unsigned char upper[32];
 
-	isc_heap_t	   *heap;
-	dns_glue_t	   *glue_list;
-	struct cds_wfs_node wfs_node;
+	isc_heap_t *heap;
+
+	dns_gluelist_t *gluelist;
 };
 
 enum {
@@ -169,7 +169,8 @@ extern dns_rdatasetmethods_t dns_rdataslab_rdatasetmethods;
 
 isc_result_t
 dns_rdataslab_fromrdataset(dns_rdataset_t *rdataset, isc_mem_t *mctx,
-			   isc_region_t *region, unsigned int reservelen);
+			   isc_region_t *region, unsigned int reservelen,
+			   uint32_t limit);
 /*%<
  * Slabify a rdataset.  The slab area will be allocated and returned
  * in 'region'.
@@ -225,7 +226,8 @@ isc_result_t
 dns_rdataslab_merge(unsigned char *oslab, unsigned char *nslab,
 		    unsigned int reservelen, isc_mem_t *mctx,
 		    dns_rdataclass_t rdclass, dns_rdatatype_t type,
-		    unsigned int flags, unsigned char **tslabp);
+		    unsigned int flags, uint32_t maxrrperset,
+		    unsigned char **tslabp);
 /*%<
  * Merge 'oslab' and 'nslab'.
  */
@@ -312,5 +314,11 @@ void
 dns_slabheader_destroy(dns_slabheader_t **headerp);
 /*%<
  * Free all memory associated with '*headerp'.
+ */
+
+void
+dns_slabheader_freeproof(isc_mem_t *mctx, dns_slabheader_proof_t **proof);
+/*%<
+ * Free all memory associated with a nonexistence proof.
  */
 ISC_LANG_ENDDECLS

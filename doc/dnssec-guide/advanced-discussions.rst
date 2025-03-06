@@ -271,7 +271,7 @@ NSEC3PARAM
 .. warning::
    Before we dive into the details of NSEC3 parametrization, please note:
    the defaults should not be changed without a strong justification and a full
-   understanding of the potential impact.
+   understanding of the potential impact. See :rfc:`9276`.
 
 The above NSEC3 examples used four parameters: 1, 0, 0, and
 zero-length salt. 1 represents the algorithm, 0 represents the opt-out
@@ -315,7 +315,7 @@ NSEC3 Opt-Out
 +++++++++++++
 
 First things first: For most DNS administrators who do not manage a huge number
-of insecure delegations, the NSEC3 opt-out featuere is not relevant.
+of insecure delegations, the NSEC3 opt-out featuere is not relevant. See :rfc:`9276`.
 
 Opt-out allows for blocks of unsigned delegations to be covered by a single NSEC3
 record. In other words, use of the opt-out allows large registries to only sign as
@@ -370,9 +370,7 @@ NSEC3 Salt
 
 The properties of this extra salt are complicated and beyond scope of this
 document. For detailed description why the salt in the context of DNSSEC
-provides little value please see `IETF draft ietf-dnsop-nsec3-guidance version
-10 section 2.4
-<https://datatracker.ietf.org/doc/html/draft-ietf-dnsop-nsec3-guidance-10#section-2.4>`__.
+provides little value please see :rfc:`9276`.
 
 .. _advanced_discussions_nsec_or_nsec3:
 
@@ -1011,13 +1009,14 @@ Below are a few challenges and disadvantages that DNSSEC faces.
 
 6. *Not enough people are using it today*: While it's estimated (as of
    mid-2020) that roughly 30% of the global Internet DNS traffic is
-   validating  [#]_ , that doesn't mean that many of the DNS zones are
-   actually signed. What this means is, even if your company's zone is
-   signed today, fewer than 30% of the Internet's servers are taking
-   advantage of this extra security. It gets worse: with less than 1.5%
-   of the ``com.`` domains signed, even if your DNSSEC validation is enabled today,
-   it's not likely to buy you or your users a whole lot more protection
-   until these popular domain names decide to sign their zones.
+   validating, [#apnic_validating_stats]_ that doesn't mean that many of
+   the DNS zones are actually signed. What this means is, even if your
+   company's zone is signed today, fewer than 30% of the Internet's
+   servers are taking advantage of this extra security. It gets worse:
+   with less than 1.5% of the ``com.`` domains signed, even if your
+   DNSSEC validation is enabled today, it's not likely to buy you or
+   your users a whole lot more protection until these popular domain
+   names decide to sign their zones.
 
 The last point may have more impact than you realize. Consider this:
 HTTP and HTTPS make up the majority of traffic on the Internet. While you may have
@@ -1032,6 +1031,6 @@ CNAME to ``foo.random-cloud-provider.com``. As long as
 fully validate everything when they visit your web page and could be
 redirected elsewhere by a cache poisoning attack.
 
-.. [#]
+.. [#apnic_validating_stats]
    Based on APNIC statistics at
    `<https://stats.labs.apnic.net/dnssec/XA>`__

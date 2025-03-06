@@ -59,7 +59,7 @@ setup_test(void **state) {
 
 	dns_dispatchmgr_detach(&dispatchmgr);
 
-	return (0);
+	return 0;
 }
 
 static int
@@ -68,7 +68,7 @@ teardown_test(void **state) {
 	dns_view_detach(&view);
 	teardown_managers(state);
 
-	return (0);
+	return 0;
 }
 
 static void
@@ -76,7 +76,7 @@ mkres(dns_resolver_t **resolverp) {
 	isc_result_t result;
 
 	isc_tlsctx_cache_create(mctx, &tlsctx_cache);
-	result = dns_resolver_create(view, loopmgr, 1, netmgr, 0, tlsctx_cache,
+	result = dns_resolver_create(view, loopmgr, netmgr, 0, tlsctx_cache,
 				     dispatch, NULL, resolverp);
 	assert_int_equal(result, ISC_R_SUCCESS);
 }
@@ -158,10 +158,10 @@ ISC_LOOP_TEST_IMPL(settimeout_belowmin) {
 	mkres(&resolver);
 
 	default_timeout = dns_resolver_gettimeout(resolver);
-	dns_resolver_settimeout(resolver, 9000);
+	dns_resolver_settimeout(resolver, 300);
 
 	timeout = dns_resolver_gettimeout(resolver);
-	assert_int_equal(timeout, default_timeout);
+	assert_in_range(timeout, default_timeout, 3999999);
 
 	destroy_resolver(&resolver);
 	isc_loopmgr_shutdown(loopmgr);
@@ -170,13 +170,16 @@ ISC_LOOP_TEST_IMPL(settimeout_belowmin) {
 /* dns_resolver_settimeout over maximum */
 ISC_LOOP_TEST_IMPL(settimeout_overmax) {
 	dns_resolver_t *resolver = NULL;
-	unsigned int timeout;
+	unsigned int default_timeout, timeout;
 
 	mkres(&resolver);
 
+	default_timeout = dns_resolver_gettimeout(resolver);
 	dns_resolver_settimeout(resolver, 4000000);
+
 	timeout = dns_resolver_gettimeout(resolver);
-	assert_in_range(timeout, 0, 3999999);
+	assert_in_range(timeout, default_timeout, 3999999);
+
 	destroy_resolver(&resolver);
 	isc_loopmgr_shutdown(loopmgr);
 }

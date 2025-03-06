@@ -67,6 +67,8 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+#include <isc/buffer.h>
+#include <isc/hashmap.h>
 #include <isc/lang.h>
 #include <isc/magic.h>
 #include <isc/region.h> /* Required for storage size of dns_label_t. */
@@ -94,10 +96,9 @@ ISC_LANG_BEGINDECLS
  * for whatever purpose the client desires.
  */
 struct dns_name {
-	unsigned int   magic;
-	unsigned char *ndata;
-	unsigned int   length;
-	unsigned int   labels;
+	unsigned int magic;
+	uint8_t	     length;
+	uint8_t	     labels;
 	struct dns_name_attrs {
 		bool absolute	  : 1; /*%< Used by name.c */
 		bool readonly	  : 1; /*%< Used by name.c */
@@ -114,13 +115,23 @@ struct dns_name {
 		bool update	  : 1; /*%< Used by client. */
 		bool hasupdaterec : 1; /*%< Used by client. */
 	} attributes;
+	unsigned char *ndata;
 	unsigned char *offsets;
 	isc_buffer_t  *buffer;
 	ISC_LINK(dns_name_t) link;
 	ISC_LIST(dns_rdataset_t) list;
+	isc_hashmap_t *hashmap;
 };
 
-#define DNS_NAME_MAGIC ISC_MAGIC('D', 'N', 'S', 'n')
+#define DNS_NAME_MAGIC	  ISC_MAGIC('D', 'N', 'S', 'n')
+#define DNS_NAME_VALID(n) ISC_MAGIC_VALID(n, DNS_NAME_MAGIC)
+
+/*%
+ * A name is "bindable" if it can be set to point to a new value, i.e.
+ * name->ndata and name->length may be changed.
+ */
+#define DNS_NAME_BINDABLE(name) \
+	(!name->attributes.readonly && !name->attributes.dynamic)
 
 /*
  * Various flags.
@@ -155,31 +166,34 @@ extern const dns_name_t *dns_wildcardname;
  *	unsigned char offsets[] = { 0, 6 };
  *	dns_name_t value = DNS_NAME_INITABSOLUTE(data, offsets);
  */
-#define DNS_NAME_INITNONABSOLUTE(A, B)                         \
-	{                                                      \
-		DNS_NAME_MAGIC, A, (sizeof(A) - 1), sizeof(B), \
-			{ .readonly = true }, B, NULL,         \
-			{ (void *)-1, (void *)-1 }, {          \
-			NULL, NULL                             \
-		}                                              \
+#define DNS_NAME_INITNONABSOLUTE(A, B)              \
+	{                                           \
+		.magic = DNS_NAME_MAGIC,            \
+		.ndata = A,                         \
+		.length = (sizeof(A) - 1),          \
+		.labels = sizeof(B),                \
+		.attributes = { .readonly = true }, \
+		.offsets = B,                       \
+		.link = ISC_LINK_INITIALIZER,       \
+		.list = ISC_LIST_INITIALIZER,       \
 	}
 
-#define DNS_NAME_INITABSOLUTE(A, B)                                      \
-	{                                                                \
-		DNS_NAME_MAGIC, A, sizeof(A), sizeof(B),                 \
-			{ .readonly = true, .absolute = true }, B, NULL, \
-			{ (void *)-1, (void *)-1 }, {                    \
-			NULL, NULL                                       \
-		}                                                        \
+#define DNS_NAME_INITABSOLUTE(A, B)                                   \
+	{                                                             \
+		.magic = DNS_NAME_MAGIC,                              \
+		.ndata = A,                                           \
+		.length = sizeof(A),                                  \
+		.labels = sizeof(B),                                  \
+		.attributes = { .readonly = true, .absolute = true }, \
+		.offsets = B,                                         \
+		.link = ISC_LINK_INITIALIZER,                         \
+		.list = ISC_LIST_INITIALIZER,                         \
 	}
 
-#define DNS_NAME_INITEMPTY                                  \
-	{                                                   \
-		DNS_NAME_MAGIC, NULL, 0, 0, {}, NULL, NULL, \
-			{ (void *)-1, (void *)-1 }, {       \
-			NULL, NULL                          \
-		}                                           \
-	}
+#define DNS_NAME_INITEMPTY              \
+	{ .magic = DNS_NAME_MAGIC,      \
+	  .link = ISC_LINK_INITIALIZER, \
+	  .list = ISC_LIST_INITIALIZER }
 
 /*%
  * Standard sizes of a wire format name
@@ -202,8 +216,15 @@ typedef isc_result_t(dns_name_totextfilter_t)(isc_buffer_t *target,
  *** Initialization
  ***/
 
-void
-dns_name_init(dns_name_t *name, unsigned char *offsets);
+static inline void
+dns_name_init(dns_name_t *name, unsigned char *offsets) {
+	*name = (dns_name_t){
+		.magic = DNS_NAME_MAGIC,
+		.offsets = (offsets),
+		.link = ISC_LINK_INITIALIZER,
+		.list = ISC_LIST_INITIALIZER,
+	};
+}
 /*%<
  * Initialize 'name'.
  *
@@ -223,8 +244,19 @@ dns_name_init(dns_name_t *name, unsigned char *offsets);
  * \li	dns_name_isabsolute(name) == false
  */
 
-void
-dns_name_reset(dns_name_t *name);
+static inline void
+dns_name_reset(dns_name_t *name) {
+	REQUIRE(DNS_NAME_VALID(name));
+	REQUIRE(DNS_NAME_BINDABLE(name));
+
+	name->ndata = NULL;
+	name->length = 0;
+	name->labels = 0;
+	name->attributes.absolute = false;
+	if (name->buffer != NULL) {
+		isc_buffer_clear(name->buffer);
+	}
+}
 /*%<
  * Reinitialize 'name'.
  *
@@ -248,8 +280,19 @@ dns_name_reset(dns_name_t *name);
  * \li	dns_name_isabsolute(name) == false
  */
 
-void
-dns_name_invalidate(dns_name_t *name);
+static inline void
+dns_name_invalidate(dns_name_t *name) {
+	REQUIRE(DNS_NAME_VALID(name));
+
+	name->magic = 0;
+	name->ndata = NULL;
+	name->length = 0;
+	name->labels = 0;
+	name->attributes = (struct dns_name_attrs){};
+	name->offsets = NULL;
+	name->buffer = NULL;
+	ISC_LINK_INIT(name, link);
+}
 /*%<
  * Make 'name' invalid.
  *
@@ -273,8 +316,13 @@ dns_name_isvalid(const dns_name_t *name);
  *** Dedicated Buffers
  ***/
 
-void
-dns_name_setbuffer(dns_name_t *name, isc_buffer_t *buffer);
+static inline void
+dns_name_setbuffer(dns_name_t *name, isc_buffer_t *buffer) {
+	REQUIRE(DNS_NAME_VALID(name));
+	REQUIRE((buffer != NULL && name->buffer == NULL) || (buffer == NULL));
+
+	name->buffer = buffer;
+}
 /*%<
  * Dedicate a buffer for use with 'name'.
  *
@@ -549,8 +597,13 @@ dns_name_matcheswildcard(const dns_name_t *name, const dns_name_t *wname);
  *** Labels
  ***/
 
-unsigned int
-dns_name_countlabels(const dns_name_t *name);
+static inline unsigned int
+dns_name_countlabels(const dns_name_t *name) {
+	REQUIRE(DNS_NAME_VALID(name));
+	REQUIRE(name->labels <= DNS_NAME_MAXLABELS);
+
+	return name->labels;
+}
 /*%<
  * How many labels does 'name' have?
  *
@@ -655,8 +708,14 @@ dns_name_fromregion(dns_name_t *name, const isc_region_t *r);
  * \li	The data in 'r' is a sequence of one or more type 00 labels.
  */
 
-void
-dns_name_toregion(const dns_name_t *name, isc_region_t *r);
+static inline void
+dns_name_toregion(const dns_name_t *name, isc_region_t *r) {
+	REQUIRE(DNS_NAME_VALID(name));
+	REQUIRE(r != NULL);
+
+	r->base = name->ndata;
+	r->length = name->length;
+}
 /*%<
  * Make 'r' refer to 'name'.
  *
@@ -946,9 +1005,27 @@ dns_name_concatenate(const dns_name_t *prefix, const dns_name_t *suffix,
  *\li	#DNS_R_NAMETOOLONG
  */
 
-void
+static inline void
 dns_name_split(const dns_name_t *name, unsigned int suffixlabels,
-	       dns_name_t *prefix, dns_name_t *suffix);
+	       dns_name_t *prefix, dns_name_t *suffix) {
+	REQUIRE(DNS_NAME_VALID(name));
+	REQUIRE(suffixlabels > 0);
+	REQUIRE(suffixlabels <= name->labels);
+	REQUIRE(prefix != NULL || suffix != NULL);
+	REQUIRE(prefix == NULL ||
+		(DNS_NAME_VALID(prefix) && DNS_NAME_BINDABLE(prefix)));
+	REQUIRE(suffix == NULL ||
+		(DNS_NAME_VALID(suffix) && DNS_NAME_BINDABLE(suffix)));
+
+	if (prefix != NULL) {
+		dns_name_getlabelsequence(name, 0, name->labels - suffixlabels,
+					  prefix);
+	}
+	if (suffix != NULL) {
+		dns_name_getlabelsequence(name, name->labels - suffixlabels,
+					  suffixlabels, suffix);
+	}
+}
 /*%<
  *
  * Split 'name' into two pieces on a label boundary.
@@ -1007,7 +1084,7 @@ dns_name_dup(const dns_name_t *source, isc_mem_t *mctx, dns_name_t *target);
  *\li	'mctx' is a valid memory context.
  */
 
-isc_result_t
+void
 dns_name_dupwithoffsets(const dns_name_t *source, isc_mem_t *mctx,
 			dns_name_t *target);
 /*%<
@@ -1268,76 +1345,14 @@ dns_name_isdnssvcb(const dns_name_t *name);
  * i.e. it starts with and optional _port label followed by a _dns label.
  */
 
-ISC_LANG_ENDDECLS
-
-/*
- *** High Performance Macros
- ***/
-
-/*
- * WARNING:  Use of these macros by applications may require recompilation
- *           of the application in some situations where calling the function
- *           would not.
+size_t
+dns_name_size(const dns_name_t *name);
+/*%<
+ * Return the amount of dynamically allocated memory associated with
+ * 'name' (which is 0 if 'name' is not dynamic).
  *
- * WARNING:  No assertion checking is done for these macros.
+ * Requires:
+ * \li	'name' to be valid.
  */
 
-#define DNS_NAME_INIT(n, o)                                 \
-	do {                                                \
-		dns_name_t *_n = (n);                       \
-		/* memset(_n, 0, sizeof(*_n)); */           \
-		_n->magic = DNS_NAME_MAGIC;                 \
-		_n->ndata = NULL;                           \
-		_n->length = 0;                             \
-		_n->labels = 0;                             \
-		_n->attributes = (struct dns_name_attrs){}; \
-		_n->offsets = (o);                          \
-		_n->buffer = NULL;                          \
-		ISC_LINK_INIT(_n, link);                    \
-		ISC_LIST_INIT(_n->list);                    \
-	} while (0)
-
-#define DNS_NAME_RESET(n)                              \
-	do {                                           \
-		(n)->ndata = NULL;                     \
-		(n)->length = 0;                       \
-		(n)->labels = 0;                       \
-		(n)->attributes.absolute = false;      \
-		if ((n)->buffer != NULL)               \
-			isc_buffer_clear((n)->buffer); \
-	} while (0)
-
-#define DNS_NAME_SETBUFFER(n, b) (n)->buffer = (b)
-
-#define DNS_NAME_COUNTLABELS(n) ((n)->labels)
-
-#define DNS_NAME_TOREGION(n, r)            \
-	do {                               \
-		(r)->base = (n)->ndata;    \
-		(r)->length = (n)->length; \
-	} while (0)
-
-#define DNS_NAME_SPLIT(n, l, p, s)                                             \
-	do {                                                                   \
-		dns_name_t  *_n = (n);                                         \
-		dns_name_t  *_p = (p);                                         \
-		dns_name_t  *_s = (s);                                         \
-		unsigned int _l = (l);                                         \
-		if (_p != NULL)                                                \
-			dns_name_getlabelsequence(_n, 0, _n->labels - _l, _p); \
-		if (_s != NULL)                                                \
-			dns_name_getlabelsequence(_n, _n->labels - _l, _l,     \
-						  _s);                         \
-	} while (0)
-
-#ifdef DNS_NAME_USEINLINE
-
-#define dns_name_init(n, o)	   DNS_NAME_INIT(n, o)
-#define dns_name_reset(n)	   DNS_NAME_RESET(n)
-#define dns_name_setbuffer(n, b)   DNS_NAME_SETBUFFER(n, b)
-#define dns_name_countlabels(n)	   DNS_NAME_COUNTLABELS(n)
-#define dns_name_isabsolute(n)	   ((n)->attributes.absolute)
-#define dns_name_toregion(n, r)	   DNS_NAME_TOREGION(n, r)
-#define dns_name_split(n, l, p, s) DNS_NAME_SPLIT(n, l, p, s)
-
-#endif /* DNS_NAME_USEINLINE */
+ISC_LANG_ENDDECLS
