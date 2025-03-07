@@ -48,7 +48,7 @@ jobs:
       run: |
         git clone https://github.com/open-quantum-safe/liboqs.git
         cd liboqs
-        git checkout 31bdf13d4b8717b143f9ed584dfb8faceb80ebd9
+        git switch --detach 971173ad82327ede5027b6d48e81bcaff92f417c
         mkdir build
         cd build
         cmake -GNinja .. -DCMAKE_INSTALL_PREFIX=$liboqs_DIR -DOQS_EXPERIMENTAL_ENABLE_SIG_STFL_KEY_SIG_GEN=ON -D-DOQS_ENABLE_SIG_STFL_XMSS=ON && ninja && ninja run_tests && ninja install
@@ -58,6 +58,7 @@ jobs:
       run: |
         git clone https://github.com/open-quantum-safe/oqs-provider.git
         cd oqs-provider
+        git switch --detach 0.6.1
         cmake -S . -B _build && cmake --build _build && ctest --test-dir _build && cmake --install _build
       env:
         OPENSSL_ROOT_DIR: ${{ runner.workspace }}/local_deps/ossl
