@@ -16,6 +16,8 @@
 #include <ctype.h>
 #include <stdio.h>
 
+#include <openssl/opensslv.h>
+
 #include <isc/buffer.h>
 #include <isc/commandline.h>
 #include <isc/fips.h>
@@ -32,6 +34,11 @@
 #include <dns/rdataset.h>
 #include <dns/time.h>
 #include <dns/ttl.h>
+
+#if OPENSSL_VERSION_NUMBER >= 0x30200000L && OPENSSL_API_LEVEL >= 30200
+#include <openssl/err.h>
+#include <openssl/provider.h>
+#endif
 
 #include "dnssectool.h"
 
@@ -1351,8 +1358,9 @@ main(int argc, char *argv[]) {
 	int ch;
 	char *endp;
 	bool set_fips_mode = false;
-#if OPENSSL_VERSION_NUMBER >= 0x30000000L && OPENSSL_API_LEVEL >= 30000
-	OSSL_PROVIDER *fips = NULL, *base = NULL;
+#if OPENSSL_VERSION_NUMBER >= 0x30200000L && OPENSSL_API_LEVEL >= 30200
+	OSSL_PROVIDER *fips = NULL, *base = NULL, *oqs = NULL,
+		      *default_provider = NULL;
 #endif
 	ksr_ctx_t ksr = {
 		.now = isc_stdtime_now(),
@@ -1456,6 +1464,33 @@ main(int argc, char *argv[]) {
 			}
 		}
 	}
+
+#if OPENSSL_VERSION_NUMBER >= 0x30200000L && OPENSSL_API_LEVEL >= 30200
+	oqs = OSSL_PROVIDER_load(NULL, "oqsprovider");
+	if (oqs == NULL) {
+		if (fips != NULL) {
+			OSSL_PROVIDER_unload(fips);
+		}
+		if (base != NULL) {
+			OSSL_PROVIDER_unload(base);
+		}
+		ERR_clear_error();
+		fatal("failed to load oqsprovider");
+	}
+	default_provider = OSSL_PROVIDER_load(NULL, "default");
+	if (default_provider == NULL) {
+		OSSL_PROVIDER_unload(oqs);
+		if (fips != NULL) {
+			OSSL_PROVIDER_unload(fips);
+		}
+		if (base != NULL) {
+			OSSL_PROVIDER_unload(base);
+		}
+		ERR_clear_error();
+		fatal("Failed to load default provider");
+	}
+#endif /* OPENSSL_VERSION_NUMBER >= 0x30200000L && OPENSSL_API_LEVEL >= 30200 \
+	*/
 
 	/* zone */
 	namestr = argv[1];
