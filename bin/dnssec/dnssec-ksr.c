@@ -1489,8 +1489,7 @@ main(int argc, char *argv[]) {
 		ERR_clear_error();
 		fatal("Failed to load default provider");
 	}
-#endif /* OPENSSL_VERSION_NUMBER >= 0x30200000L && OPENSSL_API_LEVEL >= 30200 \
-	*/
+#endif
 
 	/* zone */
 	namestr = argv[1];

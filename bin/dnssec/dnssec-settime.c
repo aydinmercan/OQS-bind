@@ -20,6 +20,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <openssl/opensslv.h>
+
 #include <isc/attributes.h>
 #include <isc/buffer.h>
 #include <isc/commandline.h>
@@ -36,11 +38,20 @@
 
 #include <dst/dst.h>
 
+#if OPENSSL_VERSION_NUMBER >= 0x30200000L && OPENSSL_API_LEVEL >= 30200
+#include <openssl/err.h>
+#include <openssl/provider.h>
+#endif
+
 #include "dnssectool.h"
 
 const char *program = "dnssec-settime";
 
 static isc_mem_t *mctx = NULL;
+
+#if OPENSSL_VERSION_NUMBER >= 0x30200000L && OPENSSL_API_LEVEL >= 30200
+OSSL_PROVIDER *oqs = NULL, *default_provider = NULL;
+#endif
 
 noreturn static void
 usage(void);
@@ -250,6 +261,20 @@ main(int argc, char **argv) {
 	setup_logging(mctx, &log);
 
 	isc_commandline_errprint = false;
+
+#if OPENSSL_VERSION_NUMBER >= 0x30200000L && OPENSSL_API_LEVEL >= 30200
+	oqs = OSSL_PROVIDER_load(NULL, "oqsprovider");
+	if (oqs == NULL) {
+		ERR_clear_error();
+		fatal("failed to load oqsprovider");
+	}
+	default_provider = OSSL_PROVIDER_load(NULL, "default");
+	if (default_provider == NULL) {
+		OSSL_PROVIDER_unload(oqs);
+		ERR_clear_error();
+		fatal("Failed to load default provider");
+	}
+#endif
 
 #define CMDLINE_FLAGS "A:D:d:E:fg:hI:i:K:k:L:P:p:R:r:S:suv:Vz:"
 	while ((ch = isc_commandline_parse(argc, argv, CMDLINE_FLAGS)) != -1) {
