@@ -442,6 +442,8 @@ dns_kasp_key_size(dns_kasp_key_t *key) {
 	unsigned int size = 0;
 	unsigned int min = 0;
 
+	const char *alg_name = NULL;
+
 	REQUIRE(key != NULL);
 
 	switch (key->algorithm) {
@@ -484,21 +486,22 @@ dns_kasp_key_size(dns_kasp_key_t *key) {
 		size = 256;
 		break;
 	case DST_ALG_XMSS:
-		const char *xmss_name = xmss_oid_to_name(key->param);
-		if (xmss_name != NULL) {
-			size = xmss_name_to_bits(xmss_name);
+		alg_name = xmss_oid_to_name(key->param);
+		if (alg_name != NULL) {
+			size = xmss_name_to_bits(alg_name);
 		}
 		break;
 	case DST_ALG_XMSSMT:
-		const char *xmssmt_name = xmssmt_oid_to_name(key->param);
-		if (xmssmt_name != NULL) {
-			size = xmssmt_name_to_bits(xmssmt_name);
+		alg_name = xmssmt_oid_to_name(key->param);
+		if (alg_name != NULL) {
+			size = xmssmt_name_to_bits(alg_name);
 		}
 		break;
 	default:
 		/* unsupported */
 		break;
 	}
+
 	return size;
 }
 
