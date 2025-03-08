@@ -645,6 +645,11 @@ keygen(keygen_ctx_t *ctx, isc_mem_t *mctx, int argc, char **argv) {
 	case DST_ALG_ECDSA384:
 	case DST_ALG_ED25519:
 	case DST_ALG_ED448:
+	case DST_ALG_FALCON512:
+	case DST_ALG_DILITHIUM2:
+	case DST_ALG_SPHINCSSHA256128S:
+	case DST_ALG_XMSS:
+	case DST_ALG_XMSSMT:
 		show_progress = true;
 		break;
 	}

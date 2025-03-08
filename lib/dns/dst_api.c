@@ -1992,6 +1992,11 @@ issymmetric(const dst_key_t *key) {
 	case DST_ALG_ECDSA384:
 	case DST_ALG_ED25519:
 	case DST_ALG_ED448:
+	case DST_ALG_FALCON512:
+	case DST_ALG_DILITHIUM2:
+	case DST_ALG_SPHINCSSHA256128S:
+	case DST_ALG_XMSS:
+	case DST_ALG_XMSSMT:
 		return false;
 	case DST_ALG_HMACMD5:
 	case DST_ALG_HMACSHA1:
