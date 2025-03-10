@@ -105,7 +105,7 @@ stfl_meta_init(stfl_meta_t **s, dst_key_t *key, char *directory) {
 	stfl_meta_t *sm = isc_mem_get(key->mctx, sizeof(stfl_meta_t));
 	sm->key = key;
 	if (directory != NULL) {
-		sm->dir = isc_mem_strdup(key->mctx, directory); 
+		sm->dir = isc_mem_strdup(key->mctx, directory);
 	} else {
 		sm->dir = NULL;
 	}
@@ -179,7 +179,7 @@ liboqsstateful_createctx(dst_key_t *key, dst_context_t *dctx) {
 	isc_buffer_allocate(dctx->mctx, &buf, 64);
 	dctx->ctxdata.generic = buf;
 
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static void
@@ -210,7 +210,7 @@ liboqsstateful_adddata(dst_context_t *dctx, const isc_region_t *data) {
 
 	result = isc_buffer_copyregion(buf, data);
 	if (result == ISC_R_SUCCESS) {
-		return (ISC_R_SUCCESS);
+		return ISC_R_SUCCESS;
 	}
 
 	length = isc_buffer_length(buf) + data->length + 64;
@@ -221,7 +221,7 @@ liboqsstateful_adddata(dst_context_t *dctx, const isc_region_t *data) {
 	isc_buffer_free(&buf);
 	dctx->ctxdata.generic = nbuf;
 
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static isc_result_t
@@ -260,7 +260,7 @@ err:
 	isc_buffer_free(&buf);
 	dctx->ctxdata.generic = NULL;
 
-	return (ret);
+	return ret;
 }
 
 static isc_result_t
@@ -291,7 +291,7 @@ err:
 	isc_buffer_free(&buf);
 	dctx->ctxdata.generic = NULL;
 
-	return (ret);
+	return ret;
 }
 
 static isc_result_t
@@ -339,7 +339,7 @@ liboqsstateful_generate(dst_key_t *key, int oid, void (*callback)(int)) {
 	stfl_meta_init(&(key->keydata.oqs_stfl_keypair.meta), key, NULL);
 	ret = ISC_R_SUCCESS;
 
-	return (ret);
+	return ret;
 
 err:
 	if (pub_key != NULL) {
@@ -354,7 +354,7 @@ err:
 		OQS_SIG_STFL_free(sig_ctx);
 	}
 
-	return (ret);
+	return ret;
 }
 
 static isc_result_t
@@ -368,7 +368,7 @@ liboqsstateful_todns(const dst_key_t *key, isc_buffer_t *data) {
 	REQUIRE(pub_key != NULL);
 	isc_buffer_usedregion(pub_key, &r);
 	if (r.length > isc_buffer_length(data)) {
-		return (ISC_R_NOSPACE);
+		return ISC_R_NOSPACE;
 	}
 	return isc_buffer_copyregion(data, &r);
 }
@@ -389,7 +389,7 @@ liboqsstateful_fromdns(dst_key_t *key, isc_buffer_t *data) {
 
 	isc_buffer_remainingregion(data, &r);
 	if (r.length == 0) {
-		return (ISC_R_SUCCESS);
+		return ISC_R_SUCCESS;
 	}
 	oid = alginfo->key_to_oid(r.base, r.length);
 	if (oid == 0) {
@@ -415,7 +415,7 @@ liboqsstateful_fromdns(dst_key_t *key, isc_buffer_t *data) {
 	key->key_size = r.length * 8;
 	stfl_meta_init(&(key->keydata.oqs_stfl_keypair.meta), key, NULL);
 	isc_mutex_init(&(key->keydata.oqs_stfl_keypair.lock));
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 
 err:
 	if (pub_key != NULL) {
@@ -426,7 +426,7 @@ err:
 		OQS_SIG_STFL_free(sig_ctx);
 	}
 
-	return (ret);
+	return ret;
 }
 
 static bool
@@ -446,12 +446,12 @@ liboqsstateful_tofile(const dst_key_t *key, const char *directory) {
 	if (key->keydata.oqs_stfl_keypair.pub == NULL ||
 	    key->keydata.oqs_stfl_keypair.priv == NULL)
 	{
-		return (DST_R_NULLKEY);
+		return DST_R_NULLKEY;
 	}
 
 	if (key->external) {
 		priv.nelements = 0;
-		return (dst__privstruct_writefile(key, &priv, directory));
+		return dst__privstruct_writefile(key, &priv, directory);
 	}
 
 	if (liboqsstateful_keypair_isprivate(key)) {
@@ -459,7 +459,7 @@ liboqsstateful_tofile(const dst_key_t *key, const char *directory) {
 			    &privbuf, &privlen,
 			    key->keydata.oqs_stfl_keypair.priv) != OQS_SUCCESS)
 		{
-			return (ISC_R_NOMEMORY);
+			return ISC_R_NOMEMORY;
 		}
 		ret = keys_to_file(key, privbuf, privlen, directory);
 	}
@@ -470,7 +470,7 @@ liboqsstateful_tofile(const dst_key_t *key, const char *directory) {
 	if (pubbuf != NULL) {
 		isc_mem_put(key->mctx, pubbuf, publen);
 	}
-	return (ret);
+	return ret;
 }
 
 static isc_result_t
@@ -555,10 +555,10 @@ liboqsstateful_parse(dst_key_t *key, isc_lex_t *lexer, dst_key_t *pub) {
 	key->keydata.oqs_stfl_keypair.ctx = sig_ctx;
 	key->key_size = pub_len * 8;
 	isc_mutex_init(&(key->keydata.oqs_stfl_keypair.lock));
-	
+
 	dst__privstruct_free(&priv, mctx);
 	isc_safe_memwipe(&priv, sizeof(priv));
-	return (ret);
+	return ret;
 err:
 	dst__privstruct_free(&priv, mctx);
 
@@ -575,7 +575,7 @@ err:
 		OQS_SIG_STFL_free(sig_ctx);
 	}
 
-	return (ret);
+	return ret;
 }
 
 static bool
@@ -589,28 +589,28 @@ liboqsstateful_keypair_compare(const dst_key_t *key1, const dst_key_t *key2) {
 	size_t key2_len = kr2.length;
 
 	if (key2_len != key_len) {
-		return (false);
+		return false;
 	}
 	if (pub_key1 == pub_key2) {
-		return (true);
+		return true;
 	}
 
 	if (memcmp(pub_key1, pub_key2, key_len) != 0) {
-		return (false);
+		return false;
 	}
 
 	/* The private key presence must be same for keys to match. */
 	if (liboqsstateful_keypair_isprivate(key1) !=
 	    liboqsstateful_keypair_isprivate(key2))
 	{
-		return (false);
+		return false;
 	}
-	return (true);
+	return true;
 }
 
 static bool
 liboqsstateful_keypair_isprivate(const dst_key_t *key) {
-	return (key->keydata.oqs_stfl_keypair.priv != NULL);
+	return key->keydata.oqs_stfl_keypair.priv != NULL;
 }
 
 static void
@@ -656,5 +656,5 @@ dst__liboqsstateful_init(dst_func_t **funcp) {
 	if (*funcp == NULL) {
 		*funcp = &liboqsstateful_functions;
 	}
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
