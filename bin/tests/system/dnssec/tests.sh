@@ -3451,6 +3451,12 @@ until test $alg -eq 256; do
     15 | 16)
       key1=$($KEYGEN -a "$alg" -n zone "$zone" 2>"keygen-$alg.err" || true)
       ;;
+    20)
+      key1=$($KEYGEN -a "XMSS_SHA256_H10" -n zone "$zone" 2>"keygen-$alg.err" || true)
+      ;;
+    21)
+      key1=$($KEYGEN -a "XMSSMT_SHAKE128_H20_2" -n zone "$zone" 2>"keygen-$alg.err" || true)
+      ;;
     *)
       key1=$($KEYGEN -a "$alg" -n zone "$zone" 2>"keygen-$alg.err" || true)
       ;;
@@ -3466,6 +3472,12 @@ until test $alg -eq 256; do
     alg=$((alg + 1))
     continue
   fi
+  case $alg in
+    20 | 21) # XMSS & XMSSMT
+      alg=$((alg + 1))
+      continue
+      ;;
+  esac
   $SETTIME -I now+4d "$key1.private" >/dev/null
   key2=$($KEYGEN -v 10 -i 3d -S "$key1.private" 2>/dev/null)
   test -f "$key2.key" -a -f "$key2.private" || {
