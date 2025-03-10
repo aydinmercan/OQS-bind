@@ -11,8 +11,9 @@
  * information regarding copyright ownership.
  */
 
-#include <dst/xmss.h>
 #include <string.h>
+
+#include <dst/xmss.h>
 
 const char *alg_xmss_name[] = { OQS_SIG_STFL_alg_xmss_sha256_h10,
 				OQS_SIG_STFL_alg_xmss_sha256_h16,
@@ -146,7 +147,7 @@ xmss_bindname_to_name(const char *bindname) {
 
 int
 xmss_name_to_bits(const char *name) {
-	int	      size;
+	int size;
 	OQS_SIG_STFL *ctx = OQS_SIG_STFL_new(name);
 	if (ctx != NULL) {
 		size = ctx->length_public_key * 8;

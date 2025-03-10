@@ -171,7 +171,7 @@ digest_sig(dst_context_t *ctx, bool downcase, dns_rdata_t *sigrdata,
 		// we 0 out the key idea to prevent this.
 		r.base[16] = 0;
 		r.base[17] = 0;
-        }
+	}
 	ret = dst_context_adddata(ctx, &r);
 	r.base[16] = key_tag[0];
 	r.base[17] = key_tag[1];

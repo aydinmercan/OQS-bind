@@ -111,8 +111,8 @@
 #define TAG_XMSSMT_PRIVATEKEY ((DST_ALG_XMSSMT << TAG_SHIFT) + 0)
 #define TAG_XMSSMT_PUBLICKEY  ((DST_ALG_XMSSMT << TAG_SHIFT) + 1)
 
-#define MERKLE_TREE_NTAGS	1
-#define TAG_MERKLE_TREE ((DST_ALG_MERKLE_TREE << TAG_SHIFT) + 0)
+#define MERKLE_TREE_NTAGS 1
+#define TAG_MERKLE_TREE	  ((DST_ALG_MERKLE_TREE << TAG_SHIFT) + 0)
 
 struct dst_private_element {
 	unsigned short tag;

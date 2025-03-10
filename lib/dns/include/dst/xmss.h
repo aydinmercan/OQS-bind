@@ -168,4 +168,3 @@ xmssmt_key_to_oid(const unsigned char *key, size_t key_len);
  * Requires:
  *\li	"key" is a valid XMSSMT public or private key encoded as a byte string.
  */
-

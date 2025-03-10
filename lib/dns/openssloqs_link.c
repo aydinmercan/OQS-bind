@@ -108,16 +108,16 @@ raw_pub_key_to_ossl(const oqs_alginfo_t *alginfo, const unsigned char *pub_key,
 
 	if (pub_key != NULL) {
 		if (pub_key_len == NULL) {
-			return (ret);
+			return ret;
 		}
 		*pkey = EVP_PKEY_new_raw_public_key_ex(NULL, alg_name, NULL,
 						       pub_key, *pub_key_len);
 		if (*pkey == NULL) {
 			ERR_print_errors_fp(stderr);
-			return (dst__openssl_toresult(ret));
+			return dst__openssl_toresult(ret);
 		}
 	}
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static isc_result_t
@@ -132,7 +132,7 @@ raw_priv_key_to_ossl(const oqs_alginfo_t *alginfo,
 	isc_result_t ret = DST_R_INVALIDPUBLICKEY;
 
 	if (pkey == NULL) {
-		return (ISC_R_NOMEMORY);
+		return ISC_R_NOMEMORY;
 	}
 	if ((param_bld = OSSL_PARAM_BLD_new()) == NULL ||
 	    !OSSL_PARAM_BLD_push_octet_string(param_bld, "priv", priv_key,
@@ -140,7 +140,7 @@ raw_priv_key_to_ossl(const oqs_alginfo_t *alginfo,
 	    !OSSL_PARAM_BLD_push_octet_string(param_bld, "pub", pub_key,
 					      *pub_key_len))
 	{
-		return (ISC_R_NOMEMORY);
+		return ISC_R_NOMEMORY;
 	}
 	params = OSSL_PARAM_BLD_to_param(param_bld);
 	if (params == NULL) {
@@ -184,7 +184,7 @@ openssloqs_createctx(dst_key_t *key, dst_context_t *dctx) {
 	isc_buffer_allocate(dctx->mctx, &buf, 64);
 	dctx->ctxdata.generic = buf;
 
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static void
@@ -213,7 +213,7 @@ openssloqs_adddata(dst_context_t *dctx, const isc_region_t *data) {
 
 	result = isc_buffer_copyregion(buf, data);
 	if (result == ISC_R_SUCCESS) {
-		return (ISC_R_SUCCESS);
+		return ISC_R_SUCCESS;
 	}
 
 	length = isc_buffer_length(buf) + data->length + 64;
@@ -224,7 +224,7 @@ openssloqs_adddata(dst_context_t *dctx, const isc_region_t *data) {
 	isc_buffer_free(&buf);
 	dctx->ctxdata.generic = nbuf;
 
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static isc_result_t
@@ -242,7 +242,7 @@ openssloqs_sign(dst_context_t *dctx, isc_buffer_t *sig) {
 	REQUIRE(alginfo != NULL);
 
 	if (ctx == NULL) {
-		return (ISC_R_NOMEMORY);
+		return ISC_R_NOMEMORY;
 	}
 
 	siglen = alginfo->sig_size;
@@ -272,7 +272,7 @@ err:
 	isc_buffer_free(&buf);
 	dctx->ctxdata.generic = NULL;
 
-	return (ret);
+	return ret;
 }
 
 static isc_result_t
@@ -289,11 +289,11 @@ openssloqs_verify(dst_context_t *dctx, const isc_region_t *sig) {
 	REQUIRE(alginfo != NULL);
 
 	if (ctx == NULL) {
-		return (ISC_R_NOMEMORY);
+		return ISC_R_NOMEMORY;
 	}
 
 	if (sig->length > alginfo->sig_size) {
-		return (DST_R_VERIFYFAILURE);
+		return DST_R_VERIFYFAILURE;
 	}
 	isc_buffer_usedregion(buf, &tbsreg);
 
@@ -323,7 +323,7 @@ err:
 	isc_buffer_free(&buf);
 	dctx->ctxdata.generic = NULL;
 
-	return (ret);
+	return ret;
 }
 
 static isc_result_t
@@ -341,8 +341,8 @@ openssloqs_generate(dst_key_t *key, int unused, void (*callback)(int)) {
 
 	ctx = EVP_PKEY_CTX_new_from_name(NULL, alginfo->alg_name, NULL);
 	if (ctx == NULL) {
-		return (dst__openssl_toresult2("EVP_PKEY_CTX_new_from_name",
-					       DST_R_OPENSSLFAILURE));
+		return dst__openssl_toresult2("EVP_PKEY_CTX_new_from_name",
+					      DST_R_OPENSSLFAILURE);
 	}
 
 	status = EVP_PKEY_keygen_init(ctx);
@@ -364,7 +364,7 @@ openssloqs_generate(dst_key_t *key, int unused, void (*callback)(int)) {
 
 err:
 	EVP_PKEY_CTX_free(ctx);
-	return (ret);
+	return ret;
 }
 
 static isc_result_t
@@ -380,14 +380,14 @@ openssloqs_todns(const dst_key_t *key, isc_buffer_t *data) {
 	len = alginfo->key_size;
 	isc_buffer_availableregion(data, &r);
 	if (r.length < len) {
-		return (ISC_R_NOSPACE);
+		return ISC_R_NOSPACE;
 	}
 
 	if (EVP_PKEY_get_raw_public_key(pkey, r.base, &len) != 1)
-		return (dst__openssl_toresult(ISC_R_FAILURE));
+		return dst__openssl_toresult(ISC_R_FAILURE);
 
 	isc_buffer_add(data, len);
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static isc_result_t
@@ -402,7 +402,7 @@ openssloqs_fromdns(dst_key_t *key, isc_buffer_t *data) {
 
 	isc_buffer_remainingregion(data, &r);
 	if (r.length == 0) {
-		return (ISC_R_SUCCESS);
+		return ISC_R_SUCCESS;
 	}
 
 	len = r.length;
@@ -414,7 +414,7 @@ openssloqs_fromdns(dst_key_t *key, isc_buffer_t *data) {
 	isc_buffer_forward(data, len);
 	key->keydata.pkeypair.pub = pkey;
 	key->key_size = len * 8;
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static isc_result_t
@@ -435,12 +435,12 @@ openssloqs_tofile(const dst_key_t *key, const char *directory) {
 	if (key->keydata.pkeypair.pub == NULL ||
 	    key->keydata.pkeypair.priv == NULL)
 	{
-		return (DST_R_NULLKEY);
+		return DST_R_NULLKEY;
 	}
 
 	if (key->external) {
 		priv.nelements = 0;
-		return (dst__privstruct_writefile(key, &priv, directory));
+		return dst__privstruct_writefile(key, &priv, directory);
 	}
 
 	i = 0;
@@ -473,7 +473,7 @@ err:
 	if (pubbuf != NULL) {
 		isc_mem_put(key->mctx, pubbuf, publen);
 	}
-	return (ret);
+	return ret;
 }
 
 static isc_result_t
@@ -552,7 +552,7 @@ openssloqs_parse(dst_key_t *key, isc_lex_t *lexer, dst_key_t *pub) {
 err:
 	dst__privstruct_free(&priv, mctx);
 	isc_safe_memwipe(&priv, sizeof(priv));
-	return (ret);
+	return ret;
 }
 
 static dst_func_t openssloqs_functions = {
@@ -587,5 +587,5 @@ dst__openssloqs_init(dst_func_t **funcp) {
 	if (*funcp == NULL) {
 		*funcp = &openssloqs_functions;
 	}
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }

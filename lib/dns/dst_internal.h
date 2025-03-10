@@ -30,14 +30,14 @@
 #pragma once
 
 #include <inttypes.h>
+#include <oqs/oqs.h>
+#include <saq/merklestream.h>
 #include <stdbool.h>
 
-#include <oqs/oqs.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/objects.h>
 #include <openssl/rsa.h>
-#include <saq/merklestream.h>
 
 #include <isc/buffer.h>
 #include <isc/hmac.h>
@@ -182,7 +182,9 @@ struct dst_func {
 	 * Key operations
 	 */
 	isc_result_t (*sign)(dst_context_t *dctx, isc_buffer_t *sig);
-	isc_result_t (*finalizesignature)(const dst_key_t *key, isc_region_t intsig, isc_buffer_t *finalsig);
+	isc_result_t (*finalizesignature)(const dst_key_t *key,
+					  isc_region_t intsig,
+					  isc_buffer_t *finalsig);
 	isc_result_t (*verify)(dst_context_t *dctx, const isc_region_t *sig);
 	isc_result_t (*verify2)(dst_context_t *dctx, int maxbits,
 				const isc_region_t *sig);

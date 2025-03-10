@@ -689,7 +689,7 @@ dst_key_is_deferred_signing(const dst_key_t *key);
  *\li	"key" is a valid dst_key.
  *
  * Returns:
- *\li 	true 
+ *\li 	true
  * \li	false
  */
 
@@ -708,7 +708,8 @@ dst_key_finalize(dst_key_t *key);
  */
 
 isc_result_t
-dst_key_signature_finalize(const dst_key_t *key, isc_buffer_t *databuf, dns_rdata_t *intsig, dns_rdata_t *finalsig);
+dst_key_signature_finalize(const dst_key_t *key, isc_buffer_t *databuf,
+			   dns_rdata_t *intsig, dns_rdata_t *finalsig);
 
 /*%<
  * Finalizes given intemediate signature and produces a final signature.

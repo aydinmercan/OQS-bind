@@ -14,6 +14,7 @@
 #include <libgen.h>
 #include <saq/merklestream.h>
 #include <stdbool.h>
+
 #include <openssl/evp.h>
 
 #include <isc/lex.h>
@@ -38,46 +39,46 @@
 
 #define SAQ_SHA256_DIGESTLENGTH 16
 static SAQ_STATUS
-merkle_ossl_sha256_cb(unsigned char *data, uint64_t data_len, unsigned char *hash,
-          uint64_t *hash_len) {
-    unsigned char tmphash[SAQ_SHA256_DIGESTLENGTH * 2];
-    unsigned int tmphash_len = SAQ_SHA256_DIGESTLENGTH * 2;
-    if (hash == NULL) {
-        // set what the length would have been and return failure;
-        *hash_len = SAQ_SHA256_DIGESTLENGTH;
-        return SAQ_FAILURE;
-    }
-    SAQ_STATUS ret = SAQ_FAILURE;
-    if (*hash_len < SAQ_SHA256_DIGESTLENGTH) {
-        return SAQ_FAILURE;
-    }
+merkle_ossl_sha256_cb(unsigned char *data, uint64_t data_len,
+		      unsigned char *hash, uint64_t *hash_len) {
+	unsigned char tmphash[SAQ_SHA256_DIGESTLENGTH * 2];
+	unsigned int tmphash_len = SAQ_SHA256_DIGESTLENGTH * 2;
+	if (hash == NULL) {
+		// set what the length would have been and return failure;
+		*hash_len = SAQ_SHA256_DIGESTLENGTH;
+		return SAQ_FAILURE;
+	}
+	SAQ_STATUS ret = SAQ_FAILURE;
+	if (*hash_len < SAQ_SHA256_DIGESTLENGTH) {
+		return SAQ_FAILURE;
+	}
 
-    EVP_MD_CTX *mdctx = NULL;
-    mdctx = EVP_MD_CTX_new();
-    if (mdctx == NULL) {
-        goto finish;
-    }
+	EVP_MD_CTX *mdctx = NULL;
+	mdctx = EVP_MD_CTX_new();
+	if (mdctx == NULL) {
+		goto finish;
+	}
 
-    if (EVP_DigestInit_ex(mdctx, EVP_sha256(), NULL) != 1) {
-        goto finish;
-    }
+	if (EVP_DigestInit_ex(mdctx, EVP_sha256(), NULL) != 1) {
+		goto finish;
+	}
 
-    if (EVP_DigestUpdate(mdctx, data, data_len) != 1) {
-        goto finish;
-    }
+	if (EVP_DigestUpdate(mdctx, data, data_len) != 1) {
+		goto finish;
+	}
 
-    if (EVP_DigestFinal(mdctx, tmphash, &tmphash_len) != 1) {
-        goto finish;
-    }
-    memcpy(hash, tmphash, SAQ_SHA256_DIGESTLENGTH);
-    *hash_len = SAQ_SHA256_DIGESTLENGTH;
-    ret = SAQ_SUCCESS;
+	if (EVP_DigestFinal(mdctx, tmphash, &tmphash_len) != 1) {
+		goto finish;
+	}
+	memcpy(hash, tmphash, SAQ_SHA256_DIGESTLENGTH);
+	*hash_len = SAQ_SHA256_DIGESTLENGTH;
+	ret = SAQ_SUCCESS;
 
 finish:
-    if (mdctx != NULL) {
-        EVP_MD_CTX_free(mdctx);
-    }
-    return (ret);
+	if (mdctx != NULL) {
+		EVP_MD_CTX_free(mdctx);
+	}
+	return ret;
 }
 
 typedef struct merkle_tags {
@@ -110,12 +111,13 @@ struct merkle_meta {
 };
 
 static void
-merkle_meta_set_dir(merkle_meta_t *s, const dst_key_t *key, const char *directory) {
+merkle_meta_set_dir(merkle_meta_t *s, const dst_key_t *key,
+		    const char *directory) {
 	if (s->dir != NULL) {
 		isc_mem_free(key->mctx, s->dir);
 	}
 	if (directory != NULL) {
-		s->dir = isc_mem_strdup(key->mctx, directory); 
+		s->dir = isc_mem_strdup(key->mctx, directory);
 	} else {
 		s->dir = NULL;
 	}
@@ -134,7 +136,7 @@ merkle_meta_init(merkle_meta_t **s, dst_key_t *key, char *directory) {
 	merkle_meta_t *sm = isc_mem_get(key->mctx, sizeof(merkle_meta_t));
 	sm->key = key;
 	if (directory != NULL) {
-		sm->dir = isc_mem_strdup(key->mctx, directory); 
+		sm->dir = isc_mem_strdup(key->mctx, directory);
 	} else {
 		sm->dir = NULL;
 	}
@@ -161,8 +163,7 @@ merkle_meta_destroy(merkle_meta_t **s) {
 static isc_result_t
 keys_to_file(const dst_key_t *key, unsigned char *tree_buf, size_t tree_len,
 	     const char *directory) {
-	const saq_merkle_alginfo_t *alginfo =
-		saqmerkle_alg_info(key->key_alg);
+	const saq_merkle_alginfo_t *alginfo = saqmerkle_alg_info(key->key_alg);
 	REQUIRE(alginfo != NULL);
 	dst_private_t priv;
 	priv.elements[0].tag = alginfo->tags.merkle_tree_tag;
@@ -178,28 +179,27 @@ save_merkle_tree(SAQ_merkle_stream_t *tree, merkle_meta_t *meta) {
 	uint64_t treelen = 0;
 	uint64_t buflen = 0;
 	unsigned char *treebuf = NULL;
-	if (SAQ_merkle_stream_byte_size(tree, &treelen)
-			!= SAQ_SUCCESS) {
-		return (ISC_R_NOMEMORY);
+	if (SAQ_merkle_stream_byte_size(tree, &treelen) != SAQ_SUCCESS) {
+		return ISC_R_NOMEMORY;
 	}
 	treebuf = isc_mem_get(meta->key->mctx, treelen);
 	if (treebuf == NULL) {
-		return (ISC_R_NOMEMORY);
+		return ISC_R_NOMEMORY;
 	}
 	buflen = treelen;
-	if(SAQ_merkle_stream_serialize(tree, treebuf, &treelen)
-			!= SAQ_SUCCESS) {
+	if (SAQ_merkle_stream_serialize(tree, treebuf, &treelen) != SAQ_SUCCESS)
+	{
 		isc_mem_put(meta->key->mctx, treebuf, buflen);
-		return (ISC_R_NOMEMORY);
+		return ISC_R_NOMEMORY;
 	}
 	if (keys_to_file(meta->key, treebuf, treelen, meta->dir) !=
 	    ISC_R_SUCCESS)
 	{
 		isc_mem_put(meta->key->mctx, treebuf, buflen);
-		return (ISC_R_NOMEMORY);
+		return ISC_R_NOMEMORY;
 	}
 	isc_mem_put(meta->key->mctx, treebuf, buflen);
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static isc_result_t
@@ -215,7 +215,7 @@ saqmerkle_createctx(dst_key_t *key, dst_context_t *dctx) {
 	isc_buffer_allocate(dctx->mctx, &buf, 64);
 	dctx->ctxdata.generic = buf;
 
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static void
@@ -246,7 +246,7 @@ saqmerkle_adddata(dst_context_t *dctx, const isc_region_t *data) {
 
 	result = isc_buffer_copyregion(buf, data);
 	if (result == ISC_R_SUCCESS) {
-		return (ISC_R_SUCCESS);
+		return ISC_R_SUCCESS;
 	}
 
 	length = isc_buffer_length(buf) + data->length + 64;
@@ -257,7 +257,7 @@ saqmerkle_adddata(dst_context_t *dctx, const isc_region_t *data) {
 	isc_buffer_free(&buf);
 	dctx->ctxdata.generic = nbuf;
 
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }
 
 static isc_result_t
@@ -271,8 +271,7 @@ saqmerkle_sign(dst_context_t *dctx, isc_buffer_t *sig) {
 	SAQ_merkle_stream_t *tree = key->keydata.saq_merkle_tree.tree;
 	isc_buffer_t *buf = (isc_buffer_t *)dctx->ctxdata.generic;
 	uint64_t sig_index = tree->data_node_count;
-	const saq_merkle_alginfo_t *alginfo =
-		saqmerkle_alg_info(key->key_alg);
+	const saq_merkle_alginfo_t *alginfo = saqmerkle_alg_info(key->key_alg);
 
 	REQUIRE(alginfo != NULL);
 	isc_buffer_availableregion(sig, &sigreg);
@@ -282,8 +281,8 @@ saqmerkle_sign(dst_context_t *dctx, isc_buffer_t *sig) {
 	INSIST(sigreg.length == sizeof(uint64_t));
 	isc_buffer_usedregion(buf, &tbsreg);
 	isc_mutex_lock(&(key->keydata.saq_merkle_tree.lock));
-	if (SAQ_merkle_stream_write(tree, tbsreg.base, tbsreg.length)
-			!= SAQ_SUCCESS)
+	if (SAQ_merkle_stream_write(tree, tbsreg.base, tbsreg.length) !=
+	    SAQ_SUCCESS)
 	{
 		isc_mutex_unlock(&(key->keydata.saq_merkle_tree.lock));
 		DST_RET(dst__openssl_toresult3(dctx->category,
@@ -291,14 +290,15 @@ saqmerkle_sign(dst_context_t *dctx, isc_buffer_t *sig) {
 					       DST_R_SIGNFAILURE));
 	}
 	isc_mutex_unlock(&(key->keydata.saq_merkle_tree.lock));
-	isc_buffer_putmem(sig, (const unsigned char *)&sig_index, sizeof(uint64_t));
+	isc_buffer_putmem(sig, (const unsigned char *)&sig_index,
+			  sizeof(uint64_t));
 	ret = ISC_R_SUCCESS;
 
 err:
 	isc_buffer_free(&buf);
 	dctx->ctxdata.generic = NULL;
 
-	return (ret);
+	return ret;
 }
 
 static isc_result_t
@@ -309,8 +309,7 @@ saqmerkle_verify(dst_context_t *dctx, const isc_region_t *sig) {
 	isc_buffer_t *root_hash = key->keydata.saq_merkle_tree.root_hash;
 	isc_buffer_t *buf = (isc_buffer_t *)dctx->ctxdata.generic;
 	SAQ_authentication_path_t *ap = NULL;
-	const saq_merkle_alginfo_t *alginfo =
-		saqmerkle_alg_info(key->key_alg);
+	const saq_merkle_alginfo_t *alginfo = saqmerkle_alg_info(key->key_alg);
 	REQUIRE(alginfo != NULL);
 
 	if (root_hash == NULL) {
@@ -320,15 +319,16 @@ saqmerkle_verify(dst_context_t *dctx, const isc_region_t *sig) {
 	isc_buffer_usedregion(buf, &tbsreg);
 	isc_buffer_usedregion(root_hash, &rhreg);
 	if (SAQ_authentication_path_deserialize(sig->base, sig->length,
-				merkle_ossl_sha256_cb, &ap) != SAQ_SUCCESS)
+						merkle_ossl_sha256_cb,
+						&ap) != SAQ_SUCCESS)
 	{
 		DST_RET(DST_R_VERIFYFAILURE);
 	}
 
 	INSIST(rhreg.length == SAQ_SHA256_DIGESTLENGTH);
 	if (SAQ_authentication_path_prove(tbsreg.base, tbsreg.length,
-						rhreg.base, rhreg.length, ap)
-			!= SAQ_SUCCESS)
+					  rhreg.base, rhreg.length,
+					  ap) != SAQ_SUCCESS)
 	{
 		DST_RET(DST_R_VERIFYFAILURE);
 	}
@@ -340,21 +340,20 @@ err:
 	isc_buffer_free(&buf);
 	dctx->ctxdata.generic = NULL;
 
-	return (ret);
+	return ret;
 }
 
 static isc_result_t
 saqmerkle_generate(dst_key_t *key, int param, void (*callback)(int)) {
 	isc_result_t ret;
 	SAQ_merkle_stream_t *tree = NULL;
-	const saq_merkle_alginfo_t *alginfo =
-		saqmerkle_alg_info(key->key_alg);
+	const saq_merkle_alginfo_t *alginfo = saqmerkle_alg_info(key->key_alg);
 	UNUSED(callback);
 	UNUSED(param);
 
 	REQUIRE(alginfo != NULL);
 
-	if (SAQ_merkle_stream_new(merkle_ossl_sha256_cb, &tree) != SAQ_SUCCESS) 
+	if (SAQ_merkle_stream_new(merkle_ossl_sha256_cb, &tree) != SAQ_SUCCESS)
 	{
 		DST_RET(DST_R_CRYPTOFAILURE);
 	}
@@ -366,14 +365,14 @@ saqmerkle_generate(dst_key_t *key, int param, void (*callback)(int)) {
 	merkle_meta_init(&(key->keydata.saq_merkle_tree.meta), key, NULL);
 	ret = ISC_R_SUCCESS;
 
-	return (ret);
+	return ret;
 
 err:
 	if (tree != NULL) {
 		SAQ_merkle_stream_destroy(&tree);
 	}
 
-	return (ret);
+	return ret;
 }
 
 static isc_result_t
@@ -382,72 +381,72 @@ saqmerkle_finalizekey(dst_key_t *key) {
 	isc_buffer_t *root_hash = NULL;
 	isc_region_t rhr;
 	SAQ_merkle_stream_t *tree = key->keydata.saq_merkle_tree.tree;
-	const saq_merkle_alginfo_t *alginfo =
-		saqmerkle_alg_info(key->key_alg);
-	
+	const saq_merkle_alginfo_t *alginfo = saqmerkle_alg_info(key->key_alg);
+
 	REQUIRE(alginfo != NULL);
 
-	if (SAQ_merkle_stream_finalize(tree)
-			!= SAQ_SUCCESS) {
-		return (DST_R_CRYPTOFAILURE);
+	if (SAQ_merkle_stream_finalize(tree) != SAQ_SUCCESS) {
+		return DST_R_CRYPTOFAILURE;
 	}
-	if (SAQ_merkle_stream_get_root_hash_len(tree, &root_hash_len) == SAQ_SUCCESS) {
+	if (SAQ_merkle_stream_get_root_hash_len(tree, &root_hash_len) ==
+	    SAQ_SUCCESS)
+	{
 		isc_buffer_allocate(key->mctx, &root_hash, root_hash_len);
 		isc_buffer_availableregion(root_hash, &rhr);
 		INSIST(rhr.length >= root_hash_len);
-		if (SAQ_merkle_stream_get_root_hash(tree, rhr.base, &root_hash_len)
-				!= SAQ_SUCCESS)
+		if (SAQ_merkle_stream_get_root_hash(
+			    tree, rhr.base, &root_hash_len) != SAQ_SUCCESS)
 		{
 			isc_buffer_free(&root_hash);
-			return (ISC_R_NOMEMORY);
+			return ISC_R_NOMEMORY;
 		}
 		isc_buffer_add(root_hash, root_hash_len);
 		if (key->keydata.saq_merkle_tree.root_hash != NULL) {
-			isc_buffer_free(&(key->keydata.saq_merkle_tree.root_hash));
+			isc_buffer_free(
+				&(key->keydata.saq_merkle_tree.root_hash));
 		}
 		key->keydata.saq_merkle_tree.root_hash = root_hash;
-		if (save_merkle_tree(key->keydata.saq_merkle_tree.tree, key->keydata.saq_merkle_tree.meta)
-				!= ISC_R_SUCCESS)
+		if (save_merkle_tree(key->keydata.saq_merkle_tree.tree,
+				     key->keydata.saq_merkle_tree.meta) !=
+		    ISC_R_SUCCESS)
 		{
 			isc_buffer_free(&root_hash);
 			key->keydata.saq_merkle_tree.root_hash = NULL;
-			return (DST_R_CRYPTOFAILURE);
+			return DST_R_CRYPTOFAILURE;
 		}
-		return (ISC_R_SUCCESS);
+		return ISC_R_SUCCESS;
 	}
-	return (DST_R_CRYPTOFAILURE);
+	return DST_R_CRYPTOFAILURE;
 }
 
 static isc_result_t
-saqmerkle_finalizesignature(const dst_key_t *key, isc_region_t in, isc_buffer_t *out) {
+saqmerkle_finalizesignature(const dst_key_t *key, isc_region_t in,
+			    isc_buffer_t *out) {
 	isc_result_t ret;
 	uint64_t index = 0;
 	uint64_t ap_size = 0;
 	isc_region_t r;
 	SAQ_authentication_path_t *ap = NULL;
-	const saq_merkle_alginfo_t *alginfo =
-		saqmerkle_alg_info(key->key_alg);
-	
+	const saq_merkle_alginfo_t *alginfo = saqmerkle_alg_info(key->key_alg);
+
 	REQUIRE(alginfo != NULL);
 	REQUIRE(in.length >= sizeof(uint64_t));
-	
+
 	index = *(uint64_t *)in.base;
-	if (SAQ_merkle_stream_get_proof(
-				key->keydata.saq_merkle_tree.tree,
-				index, &ap) != SAQ_SUCCESS)
+	if (SAQ_merkle_stream_get_proof(key->keydata.saq_merkle_tree.tree,
+					index, &ap) != SAQ_SUCCESS)
 	{
 		DST_RET(DST_R_CRYPTOFAILURE);
 	}
-	if (SAQ_authentication_path_byte_size(ap, &ap_size) != SAQ_SUCCESS)
-	{
+	if (SAQ_authentication_path_byte_size(ap, &ap_size) != SAQ_SUCCESS) {
 		DST_RET(DST_R_CRYPTOFAILURE);
 	}
 	isc_buffer_availableregion(out, &r);
 	if (ap_size > r.length) {
 		DST_RET(ISC_R_NOSPACE);
 	}
-	if (SAQ_authentication_path_serialize(ap, r.base, &ap_size)
-			!= SAQ_SUCCESS)
+	if (SAQ_authentication_path_serialize(ap, r.base, &ap_size) !=
+	    SAQ_SUCCESS)
 	{
 		DST_RET(DST_R_CRYPTOFAILURE);
 	}
@@ -458,14 +457,13 @@ err:
 	if (ap != NULL) {
 		SAQ_authentication_path_destroy(&ap);
 	}
-	return (ret);
+	return ret;
 }
 
 static isc_result_t
 saqmerkle_todns(const dst_key_t *key, isc_buffer_t *data) {
 	isc_region_t r;
-	const saq_merkle_alginfo_t *alginfo =
-		saqmerkle_alg_info(key->key_alg);
+	const saq_merkle_alginfo_t *alginfo = saqmerkle_alg_info(key->key_alg);
 	isc_buffer_t *root_hash = key->keydata.saq_merkle_tree.root_hash;
 
 	REQUIRE(alginfo != NULL);
@@ -476,7 +474,7 @@ saqmerkle_todns(const dst_key_t *key, isc_buffer_t *data) {
 		// hasn't be generated yet.
 		memset(r.base, 0, SAQ_SHA256_DIGESTLENGTH);
 		isc_buffer_add(data, SAQ_SHA256_DIGESTLENGTH);
-		return (ISC_R_SUCCESS);
+		return ISC_R_SUCCESS;
 	}
 	isc_buffer_usedregion(root_hash, &r);
 	return isc_buffer_copyregion(data, &r);
@@ -488,16 +486,15 @@ saqmerkle_fromdns(dst_key_t *key, isc_buffer_t *data) {
 	isc_region_t r;
 	isc_buffer_t *root_hash = NULL;
 	isc_region_t rhreg;
-	const saq_merkle_alginfo_t *alginfo =
-		saqmerkle_alg_info(key->key_alg);
+	const saq_merkle_alginfo_t *alginfo = saqmerkle_alg_info(key->key_alg);
 
 	REQUIRE(alginfo != NULL);
 	isc_buffer_remainingregion(data, &r);
 
 	if (r.length == 0) {
-		return (ISC_R_SUCCESS);
+		return ISC_R_SUCCESS;
 	}
-	
+
 	INSIST(r.length == alginfo->root_hash_size);
 	isc_buffer_allocate(key->mctx, &root_hash, r.length);
 
@@ -514,13 +511,13 @@ saqmerkle_fromdns(dst_key_t *key, isc_buffer_t *data) {
 	key->key_size = r.length * 8;
 	isc_mutex_init(&(key->keydata.saq_merkle_tree.lock));
 	merkle_meta_init(&(key->keydata.saq_merkle_tree.meta), key, NULL);
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 
 err:
 	if (root_hash != NULL) {
 		isc_buffer_free(&root_hash);
 	}
-	return (ret);
+	return ret;
 }
 
 static bool
@@ -529,29 +526,30 @@ saqmerkle_keypair_isprivate(const dst_key_t *key);
 static isc_result_t
 saqmerkle_tofile(const dst_key_t *key, const char *directory) {
 	dst_private_t priv;
-	const saq_merkle_alginfo_t *alginfo =
-		saqmerkle_alg_info(key->key_alg);
+	const saq_merkle_alginfo_t *alginfo = saqmerkle_alg_info(key->key_alg);
 
 	REQUIRE(alginfo != NULL);
 
-	if (key->keydata.saq_merkle_tree.tree == NULL)
-	{
-		return (DST_R_NULLKEY);
+	if (key->keydata.saq_merkle_tree.tree == NULL) {
+		return DST_R_NULLKEY;
 	}
 
 	if (key->external) {
 		priv.nelements = 0;
-		return (dst__privstruct_writefile(key, &priv, directory));
+		return dst__privstruct_writefile(key, &priv, directory);
 	}
 
 	if (saqmerkle_keypair_isprivate(key)) {
-		if (!merkle_meta_dir_is_set(key->keydata.saq_merkle_tree.meta)) {
-			merkle_meta_set_dir(key->keydata.saq_merkle_tree.meta, key, directory);
+		if (!merkle_meta_dir_is_set(key->keydata.saq_merkle_tree.meta))
+		{
+			merkle_meta_set_dir(key->keydata.saq_merkle_tree.meta,
+					    key, directory);
 		}
-		return save_merkle_tree(key->keydata.saq_merkle_tree.tree, key->keydata.saq_merkle_tree.meta);
+		return save_merkle_tree(key->keydata.saq_merkle_tree.tree,
+					key->keydata.saq_merkle_tree.meta);
 	}
 
-	return (DST_R_INVALIDPRIVATEKEY);
+	return DST_R_INVALIDPRIVATEKEY;
 }
 
 static isc_result_t
@@ -566,8 +564,7 @@ saqmerkle_parse(dst_key_t *key, isc_lex_t *lexer, dst_key_t *pub) {
 	int i, tree_index = -1;
 	uint64_t root_hash_len;
 	isc_mem_t *mctx = key->mctx;
-	const saq_merkle_alginfo_t *alginfo =
-		saqmerkle_alg_info(key->key_alg);
+	const saq_merkle_alginfo_t *alginfo = saqmerkle_alg_info(key->key_alg);
 
 	UNUSED(pub);
 
@@ -592,18 +589,21 @@ saqmerkle_parse(dst_key_t *key, isc_lex_t *lexer, dst_key_t *pub) {
 		DST_RET(DST_R_INVALIDPRIVATEKEY);
 	}
 
-	if (SAQ_merkle_stream_deserialize(
-		    priv.elements[tree_index].data, priv.elements[tree_index].length,
-		    merkle_ossl_sha256_cb, &tree) != SAQ_SUCCESS)
+	if (SAQ_merkle_stream_deserialize(priv.elements[tree_index].data,
+					  priv.elements[tree_index].length,
+					  merkle_ossl_sha256_cb,
+					  &tree) != SAQ_SUCCESS)
 	{
 		DST_RET(ISC_R_NOMEMORY);
 	}
-	if (SAQ_merkle_stream_get_root_hash_len(tree, &root_hash_len) == SAQ_SUCCESS) {
+	if (SAQ_merkle_stream_get_root_hash_len(tree, &root_hash_len) ==
+	    SAQ_SUCCESS)
+	{
 		isc_buffer_allocate(key->mctx, &root_hash, root_hash_len);
 		isc_buffer_availableregion(root_hash, &rhr);
 		INSIST(rhr.length >= root_hash_len);
-		if (SAQ_merkle_stream_get_root_hash(tree, rhr.base, &root_hash_len)
-				!= SAQ_SUCCESS)
+		if (SAQ_merkle_stream_get_root_hash(
+			    tree, rhr.base, &root_hash_len) != SAQ_SUCCESS)
 		{
 			DST_RET(ISC_R_NOMEMORY);
 		}
@@ -616,10 +616,10 @@ saqmerkle_parse(dst_key_t *key, isc_lex_t *lexer, dst_key_t *pub) {
 	key->key_size = alginfo->root_hash_size * 8;
 	isc_mutex_init(&(key->keydata.saq_merkle_tree.lock));
 	merkle_meta_init(&(key->keydata.saq_merkle_tree.meta), key, dir);
-	
+
 	dst__privstruct_free(&priv, mctx);
 	isc_safe_memwipe(&priv, sizeof(priv));
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 err:
 	dst__privstruct_free(&priv, mctx);
 	isc_safe_memwipe(&priv, sizeof(priv));
@@ -632,37 +632,41 @@ err:
 		isc_buffer_free(&root_hash);
 	}
 
-	return (ret);
+	return ret;
 }
 
 static bool
 saqmerkle_keypair_compare(const dst_key_t *key1, const dst_key_t *key2) {
 	isc_region_t rhr1, rhr2;
 	if (key1->keydata.saq_merkle_tree.root_hash != NULL &&
-		key2->keydata.saq_merkle_tree.root_hash == NULL) {
-		return (false);
+	    key2->keydata.saq_merkle_tree.root_hash == NULL)
+	{
+		return false;
 	}
 	if (key1->keydata.saq_merkle_tree.root_hash == NULL &&
-		key2->keydata.saq_merkle_tree.root_hash != NULL) {
-		return (false);
+	    key2->keydata.saq_merkle_tree.root_hash != NULL)
+	{
+		return false;
 	}
 	if (key1->keydata.saq_merkle_tree.root_hash != NULL) {
-		isc_buffer_usedregion(key1->keydata.saq_merkle_tree.root_hash, &rhr1);
-		isc_buffer_usedregion(key2->keydata.saq_merkle_tree.root_hash, &rhr2);
+		isc_buffer_usedregion(key1->keydata.saq_merkle_tree.root_hash,
+				      &rhr1);
+		isc_buffer_usedregion(key2->keydata.saq_merkle_tree.root_hash,
+				      &rhr2);
 		unsigned char *root_hash1 = rhr1.base;
 		unsigned char *root_hash2 = rhr2.base;
 		size_t root_hash1_len = rhr1.length;
 		size_t root_hash2_len = rhr2.length;
 
 		if (root_hash1_len != root_hash2_len) {
-			return (false);
+			return false;
 		}
 		if (root_hash1 == root_hash2) {
-			return (true);
+			return true;
 		}
 
 		if (memcmp(root_hash1, root_hash2, root_hash1_len) != 0) {
-			return (false);
+			return false;
 		}
 	}
 
@@ -670,14 +674,14 @@ saqmerkle_keypair_compare(const dst_key_t *key1, const dst_key_t *key2) {
 	if (saqmerkle_keypair_isprivate(key1) !=
 	    saqmerkle_keypair_isprivate(key2))
 	{
-		return (false);
+		return false;
 	}
-	return (true);
+	return true;
 }
 
 static bool
 saqmerkle_keypair_isprivate(const dst_key_t *key) {
-	return (key->keydata.saq_merkle_tree.tree != NULL);
+	return key->keydata.saq_merkle_tree.tree != NULL;
 }
 
 static void
@@ -726,5 +730,5 @@ dst__saqmerkle_init(dst_func_t **funcp) {
 	if (*funcp == NULL) {
 		*funcp = &saqmerkle_functions;
 	}
-	return (ISC_R_SUCCESS);
+	return ISC_R_SUCCESS;
 }

@@ -55,6 +55,7 @@
 #define DST_KEY_INTERNAL
 
 #include <oqs/oqs.h>
+#include <saq/merkleauthpath.h>
 
 #include <isc/result.h>
 
@@ -65,8 +66,6 @@
 #include <dns/rdataclass.h>
 #include <dns/ttl.h>
 #include <dns/types.h>
-
-#include <saq/merkleauthpath.h>
 
 #include "dst_internal.h"
 
@@ -280,13 +279,12 @@ dst_algorithm_is_deferred_signing(const int alg) {
 
 	switch (alg) {
 	case DST_ALG_MERKLE_TREE:
-		return (true);
+		return true;
 		break;
 	default:
-		return (false);
+		return false;
 	}
 }
-
 
 bool
 dst_ds_digest_supported(unsigned int digest_type) {
@@ -1108,10 +1106,10 @@ dst_key_is_deferred_signing(const dst_key_t *key) {
 
 	switch (key->key_alg) {
 	case DST_ALG_MERKLE_TREE:
-		return (true);
+		return true;
 		break;
 	default:
-		return (false);
+		return false;
 	}
 }
 
@@ -1124,18 +1122,19 @@ dst_key_finalize(dst_key_t *key) {
 	REQUIRE(dst_key_is_deferred_signing(key));
 
 	if (key->func->finalizekey == NULL) {
-		return (DST_R_UNSUPPORTEDALG);
+		return DST_R_UNSUPPORTEDALG;
 	}
 
 	ret = key->func->finalizekey(key);
 	if (ret != ISC_R_SUCCESS) {
 		return ret;
 	}
-	return (computeid(key));
+	return computeid(key);
 }
 
 isc_result_t
-dst_key_signature_finalize(const dst_key_t *key, isc_buffer_t *databuf, dns_rdata_t *intsig, dns_rdata_t *finalsig) {
+dst_key_signature_finalize(const dst_key_t *key, isc_buffer_t *databuf,
+			   dns_rdata_t *intsig, dns_rdata_t *finalsig) {
 	dns_rdata_rrsig_t fs;
 	dns_rdata_rrsig_t is;
 	dns_rdata_t finalsig_rdata = DNS_RDATA_INIT;
@@ -1150,15 +1149,15 @@ dst_key_signature_finalize(const dst_key_t *key, isc_buffer_t *databuf, dns_rdat
 	REQUIRE(dst_key_is_deferred_signing(key));
 
 	if (key->keydata.generic == NULL) {
-		return (DST_R_NULLKEY);
+		return DST_R_NULLKEY;
 	}
 
 	if (key->func->isprivate == NULL || !key->func->isprivate(key)) {
-		return (DST_R_NOTPRIVATEKEY);
+		return DST_R_NOTPRIVATEKEY;
 	}
 
 	if (key->func->finalizesignature == NULL) {
-		return (DST_R_NOTPRIVATEKEY);
+		return DST_R_NOTPRIVATEKEY;
 	}
 
 	dns_rdata_clone(intsig, &finalsig_rdata);
@@ -1188,14 +1187,15 @@ dst_key_signature_finalize(const dst_key_t *key, isc_buffer_t *databuf, dns_rdat
 	}
 	fs.keyid = dst_key_id(key);
 
-	dns_rdata_fromstruct(finalsig, intsig->rdclass, dns_rdatatype_rrsig, &fs, databuf);
+	dns_rdata_fromstruct(finalsig, intsig->rdclass, dns_rdatatype_rrsig,
+			     &fs, databuf);
 	isc_mem_put(key->mctx, fs.signature, fs.siglen);
 
 free_fs:
 	dns_rdata_freestruct(&fs);
 free_is:
 	dns_rdata_freestruct(&is);
-	return (ret);
+	return ret;
 }
 
 isc_result_t
@@ -1631,8 +1631,8 @@ dst_key_sigsize(const dst_key_t *key, unsigned int *n) {
 			*n = sizeof(uint64_t);
 		} else {
 			if (SAQ_merkle_stream_max_authentication_path_byte_size(
-						key->keydata.saq_merkle_tree.tree,
-						&merkle_size) == SAQ_SUCCESS)
+				    key->keydata.saq_merkle_tree.tree,
+				    &merkle_size) == SAQ_SUCCESS)
 			{
 				*n = merkle_size;
 			} else {

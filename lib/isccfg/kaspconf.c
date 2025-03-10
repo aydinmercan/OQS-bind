@@ -133,7 +133,7 @@ cfg_kaspkey_fromconfig(const cfg_obj_t *config, dns_kasp_t *kasp,
 		key->role |= DNS_KASP_KEY_ROLE_KSK | DNS_KASP_KEY_ROLE_ZSK;
 		key->lifetime = 0; /* unlimited */
 		key->algorithm = DNS_KEYALG_ECDSA256;
-		key->param= -1;
+		key->param = -1;
 		result = dns_keystorelist_find(keystorelist,
 					       DNS_KEYSTORE_KEYDIRECTORY,
 					       &key->keystore);
@@ -223,12 +223,14 @@ cfg_kaspkey_fromconfig(const cfg_obj_t *config, dns_kasp_t *kasp,
 		obj = cfg_tuple_get(config, "algorithm");
 		algname = cfg_obj_asstring(obj);
 		if (strncmp(algname, "XMSSMT", 6) == 0) {
-			char *oqs_algname = (char *)xmssmt_bindname_to_name(algname);
+			char *oqs_algname =
+				(char *)xmssmt_bindname_to_name(algname);
 			key->param = xmssmt_name_to_oid(oqs_algname);
 			alg.base = (char *)"XMSSMT";
 			alg.length = strlen("XMSSMT");
 		} else if (strncmp(algname, "XMSS", 4) == 0) {
-			char *oqs_algname = (char *)xmss_bindname_to_name(algname);
+			char *oqs_algname =
+				(char *)xmss_bindname_to_name(algname);
 			key->param = xmss_name_to_oid(oqs_algname);
 			alg.base = (char *)"XMSS";
 			alg.length = strlen("XMSS");
