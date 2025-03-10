@@ -3472,6 +3472,7 @@ until test $alg -eq 256; do
     alg=$((alg + 1))
     continue
   fi
+  # TODO(aydin): fix this
   case $alg in
     20 | 21 | 22) # XMSS,  XMSSMT & Merkle Tree
       alg=$((alg + 1))
