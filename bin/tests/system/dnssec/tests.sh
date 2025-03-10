@@ -3473,7 +3473,7 @@ until test $alg -eq 256; do
     continue
   fi
   case $alg in
-    20 | 21) # XMSS & XMSSMT
+    20 | 21 | 22) # XMSS,  XMSSMT & Merkle Tree
       alg=$((alg + 1))
       continue
       ;;
